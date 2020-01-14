@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"mapreduce"
 	"os"
+	"strings"
+	"unicode"
+	"log"
+	"strconv"
 )
 
 //
@@ -15,6 +19,16 @@ import (
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
 	// Your code here (Part II).
+
+	keys := strings.FieldsFunc(contents, func(c rune) bool {
+		return !unicode.IsLetter
+	})
+
+	output := make([]mapreduce.KeyValue, 0, 0)
+	for _, key := range keys {
+		output = append(output, mapreduce.KeyValue{key, "1"})
+	} 
+	return output
 }
 
 //
@@ -24,6 +38,16 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 //
 func reduceF(key string, values []string) string {
 	// Your code here (Part II).
+
+	cnt := 0
+	for _, val := range values {
+		inc, err := strconv.ParseInt(val)
+		if err != nil {
+			log.Fatal("reduceF: ", err)
+		}
+		cnt += inc
+	}
+	return strconv.FormatInt(cnt)
 }
 
 // Can be run in 3 ways:
