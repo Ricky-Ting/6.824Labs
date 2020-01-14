@@ -1,9 +1,10 @@
 package mapreduce
 
 import (
-	"hash/fnv";
-	"os";
+	"hash/fnv"
+	"os"
 	"encoding/json"
+	"io/ioutil"
 )
 
 func doMap(
