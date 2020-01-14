@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"hash/fnv"
+	"log"
 	"os"
 	"encoding/json"
 	"io/ioutil"
@@ -64,19 +65,19 @@ func doMap(
 	
 	kvs := mapF(inFile, string(input)) 	// Call user-defined map function, and get a series of KeyValues
 
-	interFiles := make([]*File, 0, nReduce)
+	interFiles := make([]*os.File, 0, nReduce)
 	//interWriter := make([]io.Writer, 0, nReduce)
-	interEnc := make([]*Encoder, 0, nReduce)
+	interEnc := make([]*json.Encoder, 0, nReduce)
 
 	for f := 0; f < nReduce; f++ {
 		file, err := os.Create(reduceName(jobName, mapTask, f))
-		interFiles.append(file)
+		interFiles = append(interFiles, file)
 		if err != nil {
 			log.Fatal("doMap: ", err)
 		}
 		//interWriter[f] := bufio.NewWriter(interFiles[f])
-		interEnc.append(json.NewEncoder(file))
-		defer file.close()
+		interEnc = append(interEnc, json.NewEncoder(file))
+		defer file.Close()
 	} 
 
 	for _, kv := range kvs {

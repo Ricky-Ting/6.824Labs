@@ -3,8 +3,10 @@ package mapreduce
 
 import (
 	"sort"
+	"log"
 	"os"
 	"encoding/json"
+	"io"
 )
 
 
@@ -57,9 +59,9 @@ func doReduce(
 	kvs := make([]KeyValue, 0, 0)
 
 	for f := 0; f < nMap; f++ {
-		file, err := os.Open(reduceName(jobName, f, reduceTask))
-		if err != nil {
-			Log.Fatal("doReduce: ", err)
+		file, fileErr := os.Open(reduceName(jobName, f, reduceTask))
+		if fileErr != nil {
+			log.Fatal("doReduce: ", fileErr)
 		}
 
 		var kv KeyValue
@@ -68,15 +70,15 @@ func doReduce(
 		for {
 			err = dec.Decode(&kv)
 			if err == nil {
-				kvs.append(*kv)
+				kvs = append(kvs, kv)
 			} else if err == io.EOF {
 				break
 			} else {
-				Log.Fatal("doReduce: ", err)
+				log.Fatal("doReduce: ", err)
 			}
 		}
 
-		file.close()
+		file.Close()
 	}
 
 	sort.Slice(kvs, func(i, j int) bool {
@@ -85,20 +87,20 @@ func doReduce(
 
 	file, err := os.Create(outFile)
 	if err != nil {
-			Log.Fatal("doReduce: ", err)
+			log.Fatal("doReduce: ", err)
 	}
 	enc := json.NewEncoder(file)
-	defer file.close()
+	defer file.Close()
 
 
 	for f := 0; f < len(kvs); {
 		nf := f
 		val := make([]string, 0, 0) 
 		for nf < len(kvs) && kvs[f].Key == kvs[nf].Key {
-			val.append(kvs[nf].Value)
+			val = append(val, kvs[nf].Value)
 			nf++
 		}
-		output := KeyValue{kvs[f].key, reduceF(kvs[f].Key, val)}
+		output := KeyValue{kvs[f].Key, reduceF(kvs[f].Key, val)}
 		enc.Encode(&output)
 		f = nf
 	}
