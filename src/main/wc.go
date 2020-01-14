@@ -21,7 +21,7 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 	// Your code here (Part II).
 
 	keys := strings.FieldsFunc(contents, func(c rune) bool {
-		return !unicode.IsLetter
+		return !unicode.IsLetter(c)
 	})
 
 	output := make([]mapreduce.KeyValue, 0, 0)
@@ -41,13 +41,13 @@ func reduceF(key string, values []string) string {
 
 	cnt := 0
 	for _, val := range values {
-		inc, err := strconv.ParseInt(val)
+		inc, err := strconv.Atoi(val)
 		if err != nil {
 			log.Fatal("reduceF: ", err)
 		}
 		cnt += inc
 	}
-	return strconv.FormatInt(cnt)
+	return strconv.Itoa(cnt)
 }
 
 // Can be run in 3 ways:
