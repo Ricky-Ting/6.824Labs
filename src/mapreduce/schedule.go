@@ -66,8 +66,12 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 							//fmt.Printf("%s quit\n", w)
 							return 
 						}
-						call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[t], phase, t, n_other}, nil)
-						wg.Done()
+						success := call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[t], phase, t, n_other}, nil)
+						if success {
+							wg.Done()
+						} else  {
+							tasks <- t
+						}
 					}
 				}(w)
 			case <- quit:
@@ -80,8 +84,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	for t := 0; t < ntasks; t++ {
 		tasks <- t 
 	}
-	close(tasks)
 	wg.Wait()
+	close(tasks)
 	quit <- true
 	fmt.Printf("Schedule: %v done\n", phase)
 
