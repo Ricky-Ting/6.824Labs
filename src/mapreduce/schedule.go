@@ -1,6 +1,9 @@
 package mapreduce
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 //
 // schedule() starts and waits for all tasks in the given phase (mapPhase
@@ -31,42 +34,50 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// Your code here (Part III, Part IV).
 	//
 
-	var mux sync.Mutex
-	cur := 0
 
-	for w := range registerChan {
-		if w == "" {
-			break
+	var wg sync.WaitGroup
+	tasks := make(chan int)
+	quit := make(chan bool)
+ 
+ 	wg.Add(ntasks)
+
+
+ 	/*
+	go func() {
+		for w := range registerChan {
+			go func(w string) {
+				for t := range tasks{
+					call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[t], phase, t, n_other}, nil)
+					wg.Done()
+				}
+			}(w)
 		}
-		go func(w string) {
-			wg.Add(1)
+	}()
+	*/
 
-			for {
-				nexTask := -1
-				mux.Lock()
-				if cur < ntasks {
-					nexTask = cur
-					cur++
-				} else {
-					registerChan <- ""
-				}
-				mux.Unlock()
-
-				if(nexTask == -1) {
-					break
-				}
-				call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[nexTask], phase, nexTask, n_other}, nil)
+	go func() {
+		for {
+			select {
+			case w := <- registerChan:
+				go func(w string) {
+					for t := range tasks{
+						call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[t], phase, t, n_other}, nil)
+						wg.Done()
+					}
+				}(w)
+			case <- quit:
+				return
 			}
-			wg.Done()
-		}(w)
+		}
+	}()
+
+	
+	for t := 0; t < ntasks; t++ {
+		tasks <- t 
 	}
-
-
 	wg.Wait()
-
-
-
-
-
+	quit <- true
 	fmt.Printf("Schedule: %v done\n", phase)
+
+
 }
