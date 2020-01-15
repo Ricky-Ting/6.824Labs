@@ -63,6 +63,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 					for {
 						t, ok := <- tasks
 						if !ok {
+							//fmt.Printf("%s quit\n", w)
 							return 
 						}
 						call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[t], phase, t, n_other}, nil)
