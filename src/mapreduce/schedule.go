@@ -30,5 +30,43 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// Your code here (Part III, Part IV).
 	//
+
+	var mux sync.Mutex
+	cur := 0
+
+	for w := range registerChan {
+		if w == "" {
+			break
+		}
+		go func(w string) {
+			wg.Add(1)
+
+			for {
+				nexTask := -1
+				mux.Lock()
+				if cur < ntasks {
+					nexTask = cur
+					cur++
+				} else {
+					registerChan <- ""
+				}
+				mux.Unlock()
+
+				if(nexTask == -1) {
+					break
+				}
+				call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[nexTask], phase, nexTask, n_other}, nil)
+			}
+			wg.Done()
+		}(w)
+	}
+
+
+	wg.Wait()
+
+
+
+
+
 	fmt.Printf("Schedule: %v done\n", phase)
 }
