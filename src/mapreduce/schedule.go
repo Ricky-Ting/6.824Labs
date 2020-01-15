@@ -60,7 +60,11 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 			select {
 			case w := <- registerChan:
 				go func(w string) {
-					for t := range tasks{
+					for {
+						t, ok := <- tasks
+						if !ok {
+							return 
+						}
 						call(w, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[t], phase, t, n_other}, nil)
 						wg.Done()
 					}
@@ -75,6 +79,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	for t := 0; t < ntasks; t++ {
 		tasks <- t 
 	}
+	close(tasks)
 	wg.Wait()
 	quit <- true
 	fmt.Printf("Schedule: %v done\n", phase)
