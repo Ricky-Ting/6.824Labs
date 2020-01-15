@@ -58,6 +58,18 @@ func doMap(
 	// Your code here (Part I).
 	//
 
+
+
+	// 首先读入输入文件的内容，是字节流，在调用mapF的时候需要转换成string，然后得到一堆KeyValue对
+	// 我是先直接创建nReduce个文件，如果根据每一个KeyValue的值打开、写入、关闭文件，这样太慢了
+	// 我用一个*File的Slice来存储这nReduce个文件的指针，还对每个文件的输入流都指定了一个encoder，我这里使用json
+	// 然后就是对每个KeyValue对，计算Key的ihash值，把它写入到某一文件中
+
+	// 感觉interFiles这个数组不是很有必要，因为后续只要用到interEnc数组就好了
+
+
+
+
 	input, err := ioutil.ReadFile(inFile) // Read from the input file
 	if err != nil {
 		log.Fatal("doMap: ", err)

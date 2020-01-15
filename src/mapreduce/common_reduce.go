@@ -56,6 +56,14 @@ func doReduce(
 	//
 
 
+	// 从nMap个中间文件中读取KeyValue， 然后排序，
+	// 对某一Key和与之对应的所有Value调用一次reduceF生成一个KeyValue对，
+	// 最后将所有结果写入OutFile中。
+
+	// 我的实现是将所有文件都读入内存中，然后对KeyValue对进行排序，
+	// 但不知道数据量大了会怎么样，后面得去了解具体的MapReduce中的排序是怎么实现的。
+
+
 	kvs := make([]KeyValue, 0, 0)
 
 	for f := 0; f < nMap; f++ {
