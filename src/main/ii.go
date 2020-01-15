@@ -4,6 +4,9 @@ import "os"
 import "fmt"
 import "mapreduce"
 import "strings"
+import "sort"
+import "unicode"
+import "strconv"
 
 // The mapping function is called once for each piece of the input.
 // In this framework, the key is the name of the file that is being processed,
@@ -12,7 +15,7 @@ import "strings"
 func mapF(document string, value string) (res []mapreduce.KeyValue) {
 	// Your code here (Part V).
 
-	keys := strings.FieldsFunc(contents, func(c rune) bool {
+	keys := strings.FieldsFunc(value, func(c rune) bool {
 		return !unicode.IsLetter(c)
 	})
 
@@ -34,7 +37,19 @@ func reduceF(key string, values []string) string {
 	})
 
 	
-	return strings.Join(values, ",")
+	output := make([]string, 0, 0)
+	prev := ""
+	cnt := 0
+	for _, s := range values{
+		if s != prev {
+			output = append(output, s)
+			prev = s
+			cnt++
+		} 
+	}
+
+
+	return strconv.Itoa(cnt) + " " +  strings.Join(output, ",")
 }
 
 // Can be run in 3 ways:
