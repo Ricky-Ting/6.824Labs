@@ -51,11 +51,31 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 
+	// 2A
+	currentTerm 	int 
+	votedFor 		int
+	log 			[]LogEntry
+	lastLogIndex 	int
+	lastLogTerm 	int
+
+
+
+
+
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
 }
+
+
+type LogEntry struct {
+	term 	int
+	command interface{}
+}
+
+
+
 
 // return currentTerm and whether this server
 // believes it is the leader.
@@ -116,6 +136,10 @@ func (rf *Raft) readPersist(data []byte) {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	Term 			int 
+	CandidateId 	int
+	LastLogIndex 	int
+	LastLogTerm 	int
 }
 
 //
@@ -124,6 +148,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	Term 		int
+	VoteGranted	bool
 }
 
 //
@@ -131,6 +157,30 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+
+	Raft.mu.Lock()
+	defer Raft.mu.Unlock()
+
+	RequestVoteReply.Term = Raft.currentTerm
+
+	if RequestVoteArgs.Term < Raft.currentTerm {
+		RequestVoteReply.VoteGranted = false
+		return 
+	}
+
+	if Raft.votedFor != -1 && Raft.votedFor !=  RequestVoteArgs.CandidateId {
+		RequestVoteReply.VoteGranted = false
+		return 
+	}
+
+	if Raft.lastLogTerm > RequestVoteArgs.LastLogTerm || (Raft.lastLogTerm == RequestVoteArgs.LastLogTerm && Raft.lastLogIndex >= RequestVoteArgs.LastLogIndex) {
+		RequestVoteReply.VoteGranted = false
+		return 
+	}
+	
+
+	RequestVoteReply.VoteGranted = true
+	return 
 }
 
 //
@@ -138,7 +188,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // server is the index of the target server in rf.peers[].
 // expects RPC arguments in args.
 // fills in *reply with RPC reply, so caller should
-// pass &reply.
+// pass &reply.og
 // the types of the args and reply passed to Call() must be
 // the same as the types of the arguments declared in the
 // handler function (including whether they are pointers).
