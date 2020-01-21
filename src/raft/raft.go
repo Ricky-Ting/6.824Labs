@@ -345,6 +345,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 							}
 
 							rf.mu.Unlock()
+						} else if ok && !reply.VoteGranted {
+							rf.mu.Lock()
+							if reply.Term > rf.currentTerm {
+								rf.currentTerm = reply.Term 
+								rf.state = Follower
+							}
+							rf.mu.Unlock()
 						}
 					}(rf, server, rf.currentTerm, rf.me, rf.lastLogTerm, rf.lastLogIndex)
 				}
