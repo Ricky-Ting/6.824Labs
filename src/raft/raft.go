@@ -20,18 +20,20 @@ package raft
 import "sync"
 import "labrpc"
 import "time"
+import "math/rand"
+import "fmt"
 
 // import "bytes"
 // import "labgob"
 
 
 
-{
-	const Follower int = 0
-	const Candidate int = 1
-	const Leader int = 2
+const (
+	Follower int = 0
+	Candidate int = 1
+	Leader int = 2
 
-}
+)
 
 
 
@@ -69,6 +71,7 @@ type Raft struct {
 	lastLogTerm 	int
 
 
+	state 		int
 	timeout 	time.Time
 	votes 		int 
 	randGen 	*rand.Rand
@@ -171,28 +174,30 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 
-	Raft.mu.Lock()
-	defer Raft.mu.Unlock()
+	fmt.Printf("receive request vote from %d \n", args.CandidateId)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
-	RequestVoteReply.Term = Raft.currentTerm
+	reply.Term = rf.currentTerm
 
-	if RequestVoteArgs.Term < Raft.currentTerm {
-		RequestVoteReply.VoteGranted = false
+	if args.Term < rf.currentTerm {
+		reply.VoteGranted = false
 		return 
 	}
 
-	if Raft.votedFor != -1 && Raft.votedFor !=  RequestVoteArgs.CandidateId {
-		RequestVoteReply.VoteGranted = false
+	if rf.votedFor != -1 && rf.votedFor !=  args.CandidateId {
+		reply.VoteGranted = false
 		return 
 	}
 
-	if Raft.lastLogTerm > RequestVoteArgs.LastLogTerm || (Raft.lastLogTerm == RequestVoteArgs.LastLogTerm && Raft.lastLogIndex >= RequestVoteArgs.LastLogIndex) {
-		RequestVoteReply.VoteGranted = false
+	if rf.lastLogTerm > args.LastLogTerm || (rf.lastLogTerm == args.LastLogTerm && rf.lastLogIndex >= args.LastLogIndex) {
+		reply.VoteGranted = false
 		return 
 	}
 	
+	fmt.Printf(" vote for %d \n", args.CandidateId)
 
-	RequestVoteReply.VoteGranted = true
+	reply.VoteGranted = true
 	return 
 }
 
@@ -286,16 +291,20 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// Your initialization code here (2A, 2B, 2C).
 
-	rf.State = Follower
+	rf.state = Follower
+	rf.currentTerm = 0
 
-	rf.randGen := rand.New()
-	rf.randGen.Seed(time.Now().UnixNano() * me)
+	rf.randGen = rand.New( rand.NewSource(time.Now().UnixNano() * int64(me)) )
+
+	rf.timeout = time.Now().Add( time.Millisecond * time.Duration(500 + 20 * (rf.randGen.Int()%16) )  )
+
+	//rf.randGen.Seed(time.Now().UnixNano() * me)
 
 
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
+	
 
 	// Election Timeout :  500ms - 800ms
 	go func(rf *Raft) {
@@ -313,14 +322,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.state = Candidate
 				rf.votes = 1
 				rf.votedFor = rf.me
-				for server, _ := range Raft.peers {
+				for server, _ := range rf.peers {
 					if server == rf.me {
 						continue 		// Pass myself, since I have voted for myself
 					}
 					go func(rf *Raft, server int, term int, me int, lastLogTerm int, lastLogIndex int) {
 						args := RequestVoteArgs{term, me, lastLogTerm, lastLogIndex}
 						reply := RequestVoteReply{}
-						ok := Raft.sendRequestVote(server, &args, &reply)
+						ok := rf.sendRequestVote(server, &args, &reply)
 						if ok && reply.VoteGranted {
 							rf.mu.Lock()
 							if rf.currentTerm == term && rf.state == Candidate {
@@ -337,7 +346,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					}(rf, server, rf.currentTerm, rf.me, rf.lastLogTerm, rf.lastLogIndex)
 				}
 			}
-			rf.timeout = time.Now().Add( (500 + 20 * (rf.randGen.Int()%16) ) * time.Millisecond )
+			rf.timeout = time.Now().Add( time.Millisecond * time.Duration(500 + 20 * (rf.randGen.Int()%16) )  )
 			rf.mu.Unlock()
 		}
 	}(rf)
@@ -385,17 +394,22 @@ func (rf *Raft) heartBeating(term int) {
 		time.Sleep(100 * time.Millisecond)
 		rf.mu.Lock()
 		if rf.state == Leader && rf.currentTerm == term {
-			for server, _ := range Raft.peers {
+			for server, _ := range rf.peers {
 				if server == rf.me {
 					continue
 				}
 				go func(rf *Raft, server int, term int, leaderId int, prevLogIndex int, prevLogTerm int, leaderCommit int) {
-					args := AppendEntriesArgs{term, leaderId, prevLogIndex, prevLogTerm, ,leaderCommit}
+					args := AppendEntriesArgs{
+								Term 			:term, 
+								LeaderId 		:leaderId, 
+								PrevLogIndex	:prevLogIndex, 
+								PrevLogTerm		:prevLogTerm, 
+								LeaderCommit	:leaderCommit }
 					reply := AppendEntriesReply{}
 
 					rf.mu.Lock()
 					if rf.state != Leader {
-						rf.mu.Unlcok()
+						rf.mu.Unlock()
 						return 
 					}
 					rf.mu.Unlock()
