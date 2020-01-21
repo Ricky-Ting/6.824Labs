@@ -33,7 +33,7 @@ const (
 )
 
 
-const debugEnabled = true
+const debugEnabled = false
 
 func debug(format string, a ...interface{}) (n int, err error) {
 	if debugEnabled {
@@ -98,8 +98,8 @@ func (rf *Raft) GetState() (int, bool) {
 	var isleader bool
 	// Your code here (2A).
 
-	rf.Lock()
-	defer rf.Unlock()
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	term = rf.currentTerm
 	isleader = (rf.state == Leader)
@@ -180,6 +180,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if args.Term > rf.currentTerm {
 		rf.votedFor = -1
 		rf.currentTerm = args.Term
+		rf.state = Follower
 	}
 	reply.Term = rf.currentTerm
 
@@ -307,7 +308,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	// Election Timeout :  500ms - 800ms
+	// Election Timeout :  300ms - 600ms
 	go func(rf *Raft) {
 		for {
 			rf.mu.Lock()
@@ -337,7 +338,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 								rf.votes++
 
 								if rf.votes >= len(rf.peers)/2+1 {
-									debug("%d becomes Leader", rf.me)
+									debug("%d becomes Leader for term %d\n", rf.me, term)
 									rf.state = Leader
 									go rf.heartBeating(term)
 								}
@@ -348,7 +349,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					}(rf, server, rf.currentTerm, rf.me, rf.lastLogTerm, rf.lastLogIndex)
 				}
 			}
-			rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
+			rf.timeout = time.Now().Add(time.Millisecond * time.Duration(300+20*(rf.randGen.Int()%16)))
 			rf.mu.Unlock()
 		}
 	}(rf)
@@ -381,6 +382,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	rf.currentTerm = args.Term
+	rf.state = Follower
 	reply.Term = rf.currentTerm
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
 	reply.Success = true
