@@ -368,7 +368,7 @@ type AppendEntriesArgs struct {
 
 type AppendEntriesReply struct {
 	Term 	int 
-	success bool
+	Success bool
 }
 
 
@@ -378,14 +378,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
-		reply.success = false
+		reply.Success = false
 		return
 	}
 
 	rf.currentTerm = args.Term
 	reply.Term = rf.currentTerm
 	rf.timeout = time.Now().Add( time.Millisecond * time.Duration(500 + 20 * (rf.randGen.Int()%16) )  )
-	reply.success = true
+	reply.Success = true
 	return
 
 
@@ -417,8 +417,8 @@ func (rf *Raft) heartBeating(term int) {
 					}
 					rf.mu.Unlock()
 
-					ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-					if ok && !reply.success  {
+					ok := rf.peers[server].Call("Raft.AppendEntries", &args, &reply)
+					if ok && !reply.Success  {
 						rf.mu.Lock()
 						if reply.Term > rf.currentTerm {
 							rf.state = Follower 
