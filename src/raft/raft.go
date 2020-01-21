@@ -198,6 +198,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	fmt.Printf(" vote for %d \n", args.CandidateId)
 
 	reply.VoteGranted = true
+	rf.timeout = time.Now().Add( time.Millisecond * time.Duration(500 + 20 * (rf.randGen.Int()%16) )  )
 	return 
 }
 
@@ -293,6 +294,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.state = Follower
 	rf.currentTerm = 0
+	rf.votedFor = -1
 
 	rf.randGen = rand.New( rand.NewSource(time.Now().UnixNano() * int64(me)) )
 
@@ -382,6 +384,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.currentTerm = args.Term
 	reply.Term = rf.currentTerm
+	rf.timeout = time.Now().Add( time.Millisecond * time.Duration(500 + 20 * (rf.randGen.Int()%16) )  )
 	reply.success = true
 	return
 
