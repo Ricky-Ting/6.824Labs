@@ -32,6 +32,15 @@ const (
 	Leader    int = 2
 )
 
+
+const debugEnabled = false
+
+func debug(format string, a ...interface{}) (n int, err error) {
+	if debugEnabled {
+		n, err = fmt.Printf(format, a...)
+	}
+	return
+}
 //
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
@@ -77,8 +86,8 @@ type Raft struct {
 }
 
 type LogEntry struct {
-	term    int
-	command interface{}
+	Term    int
+	Command interface{}
 }
 
 // return currentTerm and whether this server
@@ -161,6 +170,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	if args.Term > rf.currentTerm {
+		rf.votedFor = -1
+		rf.currentTerm = args.Term
+	}
 	reply.Term = rf.currentTerm
 
 	if args.Term < rf.currentTerm {
@@ -173,7 +186,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	if rf.lastLogTerm > args.LastLogTerm || (rf.lastLogTerm == args.LastLogTerm && rf.lastLogIndex >= args.LastLogIndex) {
+	if rf.lastLogTerm > args.LastLogTerm || (rf.lastLogTerm == args.LastLogTerm && rf.lastLogIndex > args.LastLogIndex) {
 		reply.VoteGranted = false
 		return
 	}
@@ -271,6 +284,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 
+	fmt.Printf("Make %d \n", me)
 	// Your initialization code here (2A, 2B, 2C).
 
 	rf.state = Follower
@@ -315,7 +329,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 							if rf.currentTerm == term && rf.state == Candidate {
 								rf.votes++
 
-								if rf.votes > len(rf.peers)/2+1 {
+								if rf.votes >= len(rf.peers)/2+1 {
+
 									rf.state = Leader
 									go rf.heartBeating(term)
 								}
@@ -410,3 +425,7 @@ func (rf *Raft) heartBeating(term int) {
 
 	}
 }
+
+
+
+
