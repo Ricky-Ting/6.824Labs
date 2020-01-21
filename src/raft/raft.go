@@ -361,6 +361,23 @@ type AppendEntriesReply struct {
 }
 
 
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if args.Term < rf.currentTerm {
+		reply.Term = rf.currentTerm
+		reply.success = false
+		return
+	}
+
+	rf.currentTerm = args.Term
+	reply.Term = rf.currentTerm
+	reply.success = true
+	return
+
+
+}
 
 
 func (rf *Raft) heartBeating(term int) {
