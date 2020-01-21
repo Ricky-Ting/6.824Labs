@@ -307,7 +307,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			time.Sleep(dura)
 
 			rf.mu.Lock()
-			if rf.timeout.Before(time.Now()) {
+			if rf.timeout.Before(time.Now()) && rf.state != Leader {
 				// Become candidate and vote for self
 				rf.currentTerm++
 				rf.state = Candidate
