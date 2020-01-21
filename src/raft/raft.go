@@ -33,7 +33,7 @@ const (
 )
 
 
-const debugEnabled = false
+const debugEnabled = true
 
 func debug(format string, a ...interface{}) (n int, err error) {
 	if debugEnabled {
@@ -97,6 +97,13 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+
+	rf.Lock()
+	defer rf.Unlock()
+
+	term = rf.currentTerm
+	isleader = (rf.state == Leader)
+
 	return term, isleader
 }
 
@@ -166,7 +173,7 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 
-	fmt.Printf("receive request vote from %d \n", args.CandidateId)
+	debug("receive request vote from %d \n", args.CandidateId)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -191,7 +198,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	fmt.Printf(" vote for %d \n", args.CandidateId)
+	debug(" vote for %d \n", args.CandidateId)
 
 	reply.VoteGranted = true
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
@@ -284,7 +291,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 
-	fmt.Printf("Make %d \n", me)
+	debug("Make %d \n", me)
 	// Your initialization code here (2A, 2B, 2C).
 
 	rf.state = Follower
@@ -330,7 +337,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 								rf.votes++
 
 								if rf.votes >= len(rf.peers)/2+1 {
-
+									debug("%d becomes Leader", rf.me)
 									rf.state = Leader
 									go rf.heartBeating(term)
 								}
