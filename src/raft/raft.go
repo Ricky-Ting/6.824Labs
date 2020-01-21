@@ -19,9 +19,19 @@ package raft
 
 import "sync"
 import "labrpc"
+import "time"
 
 // import "bytes"
 // import "labgob"
+
+
+
+{
+	const Follower int = 0
+	const Candidate int = 1
+	const Leader int = 2
+
+}
 
 
 
@@ -59,6 +69,9 @@ type Raft struct {
 	lastLogTerm 	int
 
 
+	timeout 	time.Time
+	votes 		int 
+	randGen 	*rand.Rand
 
 
 
@@ -273,9 +286,120 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// Your initialization code here (2A, 2B, 2C).
 
+	rf.State = Follower
+
+	rf.randGen := rand.New()
+	rf.randGen.Seed(time.Now().UnixNano() * me)
+
+
+
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 
+	// Election Timeout :  500ms - 800ms
+	go func(rf *Raft) {
+		for {
+			rf.mu.Lock()
+			dura := time.Until(rf.timeout) 
+			rf.mu.Unlock()
+
+			time.Sleep(dura)
+
+			rf.mu.Lock()
+			if rf.timeout.Before(time.Now()) {
+				// Become candidate and vote for self
+				rf.currentTerm++
+				rf.state = Candidate
+				rf.votes = 1
+				rf.votedFor = rf.me
+				for server, _ := range Raft.peers {
+					if server == rf.me {
+						continue 		// Pass myself, since I have voted for myself
+					}
+					go func(rf *Raft, server int, term int, me int, lastLogTerm int, lastLogIndex int) {
+						args := RequestVoteArgs{term, me, lastLogTerm, lastLogIndex}
+						reply := RequestVoteReply{}
+						ok := Raft.sendRequestVote(server, &args, &reply)
+						if ok && reply.VoteGranted {
+							rf.mu.Lock()
+							if rf.currentTerm == term && rf.state == Candidate {
+								rf.votes++
+								
+								if(rf.votes > len(rf.peers)/2+1) {
+									rf.state = Leader
+									go rf.heartBeating(term)
+								}
+							}
+							
+							rf.mu.Unlock()
+						}
+					}(rf, server, rf.currentTerm, rf.me, rf.lastLogTerm, rf.lastLogIndex)
+				}
+			}
+			rf.timeout = time.Now().Add( (500 + 20 * (rf.randGen.Int()%16) ) * time.Millisecond )
+			rf.mu.Unlock()
+		}
+	}(rf)
+
+
 	return rf
 }
+
+type AppendEntriesArgs struct {
+	Term 			int
+	LeaderId 		int
+	PrevLogIndex	int
+	PrevLogTerm		int 
+	Entries 		[]LogEntry
+	LeaderCommit	int 
+}
+
+type AppendEntriesReply struct {
+	Term 	int 
+	success bool
+}
+
+
+
+
+func (rf *Raft) heartBeating(term int) {
+	for {
+		time.Sleep(100 * time.Millisecond)
+		rf.mu.Lock()
+		if rf.state == Leader && rf.currentTerm == term {
+			for server, _ := range Raft.peers {
+				if server == rf.me {
+					continue
+				}
+				go func(rf *Raft, server int, term int, leaderId int, prevLogIndex int, prevLogTerm int, leaderCommit int) {
+					args := AppendEntriesArgs{term, leaderId, prevLogIndex, prevLogTerm, ,leaderCommit}
+					reply := AppendEntriesReply{}
+
+					rf.mu.Lock()
+					if rf.state != Leader {
+						rf.mu.Unlcok()
+						return 
+					}
+					rf.mu.Unlock()
+
+					ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+					if ok && !reply.success  {
+						rf.mu.Lock()
+						if reply.Term > rf.currentTerm {
+							rf.state = Follower 
+							rf.currentTerm = reply.Term 
+						} 
+						rf.mu.Unlock()
+					}
+				}(rf, server, rf.currentTerm, rf.me, 0, 0, 0)
+			}			
+		} else {
+			rf.mu.Unlock()
+			return 
+		}
+		rf.mu.Unlock()
+
+	}
+}
+
