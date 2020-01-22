@@ -180,7 +180,9 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 
-	debug("receive request vote from %d \n", args.CandidateId)
+	debug("%d receive request vote from %d \n", rf.me, args.CandidateId)
+	//fmt.Println(args)
+	debug("term %d me %d voteFor %d \n", rf.currentTerm, rf.me, rf.votedFor)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -212,10 +214,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	debug(" vote for %d \n", args.CandidateId)
+	debug("%d vote for %d \n", rf.me, args.CandidateId)
 
 	// 4. Otherwise reply true
 	reply.VoteGranted = true
+	rf.votedFor = args.CandidateId
 
 	// granting vote to candidate, then reset timer
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
@@ -510,7 +513,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 
-
 	reply.Success = true
 	return
 
@@ -563,7 +565,7 @@ func (rf *Raft) heartBeating(term int) {
 
 
 func min(x, y int) int {
-	if x > y {
+	if x < y {
 		return x
 	}
 	return y
