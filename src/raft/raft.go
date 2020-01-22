@@ -184,23 +184,29 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	// If RPC request or response contains term T > currentTerm: 
+	// set currentTerm = T, convert to follower
 	if args.Term > rf.currentTerm {
 		rf.votedFor = -1
 		rf.currentTerm = args.Term
 		rf.state = Follower
 	}
+
 	reply.Term = rf.currentTerm
 
+	// 1. Reply false if term < currentTerm
 	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
 		return
 	}
 
+	// 2. Reply false if voteFor is not null and candidatedId
 	if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
 		reply.VoteGranted = false
 		return
 	}
 
+	// 3. Reply false if candidate’s log is not at least as up-date as receiver's log
 	if rf.lastLogTerm > args.LastLogTerm || (rf.lastLogTerm == args.LastLogTerm && rf.lastLogIndex > args.LastLogIndex) {
 		reply.VoteGranted = false
 		return
@@ -208,8 +214,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	debug(" vote for %d \n", args.CandidateId)
 
+	// 4. Otherwise reply true
 	reply.VoteGranted = true
+
+	// granting vote to candidate, then reset timer
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
+	
 	return
 }
 
