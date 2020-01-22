@@ -72,18 +72,18 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	// Persistent
-	currentTerm  int
-	votedFor     int
-	log          []LogEntry
-	lastLogIndex int
+	currentTerm  int 	
+	votedFor     int 			// vote for which server in the latest term
+	log          []LogEntry     // log entries
+	lastLogIndex int 
 	lastLogTerm  int
 
 	// Volatile on all servers	
-	state   int
-	timeout time.Time
-	votes   int
-	randGen *rand.Rand
-	commitIndex	 int 
+	state   int 				// Leader, Follower, or Candidate
+	timeout time.Time 			// Used for cal timeout
+	votes   int 				// votes get for the lastest term
+	randGen *rand.Rand 			// random gen for election timeout
+	commitIndex	 int  			
 	lastApplied  int
 
 	// Volatile state on master
@@ -345,15 +345,21 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	debug("Make %d \n", me)
 	// Your initialization code here (2A, 2B, 2C).
 
+	// set: State = Follower, currentTerm = 0, voteFor = -1
 	rf.state = Follower
 	rf.currentTerm = 0
 	rf.votedFor = -1
 
+	// initial the random generator for election timeout 
+	// use current time and serverId to get the seed
 	rf.randGen = rand.New(rand.NewSource(time.Now().UnixNano() * int64(me)))
 
+	// Inital election timeout
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
 
 
+	// Initially, we have log entry at index 0
+	// All new log entries start from 1
 	rf.log = append(rf.log, LogEntry{Term: 0})
 	rf.lastLogIndex = 0
 	rf.lastLogTerm = 0
@@ -361,24 +367,29 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitIndex = 0
 
 	// initialize from state persisted before a crash
+	// if it has persisted state saved, it will cover the initialization above
 	rf.readPersist(persister.ReadRaftState())
+
 
 	// Election Timeout :  300ms - 600ms
 	go func(rf *Raft) {
 		for {
 			rf.mu.Lock()
-			dura := time.Until(rf.timeout)
+			dura := time.Until(rf.timeout) // Get the duration from now to tiemout
 			rf.mu.Unlock()
 
-			time.Sleep(dura)
+			time.Sleep(dura) // Sleep for dura time, Sleep without holding the lock
 
 			rf.mu.Lock()
-			if rf.timeout.Before(time.Now()) && rf.state != Leader {
+			if rf.timeout.Before(time.Now()) && rf.state != Leader { 
+				// timeout and not the leader
+
 				// Become candidate and vote for self
 				rf.currentTerm++
 				rf.state = Candidate
 				rf.votes = 1
 				rf.votedFor = rf.me
+
 				for server, _ := range rf.peers {
 					if server == rf.me {
 						continue // Pass myself, since I have voted for myself
@@ -390,11 +401,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 						if ok && reply.VoteGranted {
 							rf.mu.Lock()
 							if rf.currentTerm == term && rf.state == Candidate {
+								// state doesn't change since RequestVote
 								rf.votes++
 
 								if rf.votes >= len(rf.peers)/2+1 {
+									// Only once
 									debug("%d becomes Leader for term %d\n", rf.me, term)
 									rf.state = Leader
+
+									// initialize nextIndex and matchIndex
 									rf.nextIndex = []int{}
 									rf.matchIndex = []int{}
 									for i := 0; i < len(rf.peers); i++ {
@@ -402,6 +417,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 										rf.matchIndex = append(rf.matchIndex, 0)
 									}
 
+									// start heartbeating
 									go rf.heartBeating(term)
 								}
 							}
