@@ -67,21 +67,28 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 
-	// 2A
+	// Your data here (2A, 2B, 2C).
+	// Look at the paper's Figure 2 for a description of what
+	// state a Raft server must maintain.
+
+	// Persistent
 	currentTerm  int
 	votedFor     int
 	log          []LogEntry
 	lastLogIndex int
 	lastLogTerm  int
 
+	// Volatile on all servers	
 	state   int
 	timeout time.Time
 	votes   int
 	randGen *rand.Rand
+	commitIndex	 int 
+	lastApplied  int
 
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
+	// Volatile state on master
+	nextIndex 	[]int 
+	matchIndex 	[]int
 
 }
 
@@ -278,7 +285,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.log[index] = LogEntry{term, command}
 	}
 
-	
+	for server, _ := range rf.peers {
+		go func(rf *Raft, server int) {
+			rf.mu.Lock()
+			args := AppendEntriesArgs{rf.currentTerm, rf.me, } 
+			rf.mu.Unlock()
+		}(rf, server)
+	}
 
 
 	return index, term, isLeader
@@ -323,7 +336,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
 
-	//rf.randGen.Seed(time.Now().UnixNano() * me)
+
+	rf.log = append(rf.log, LogEntry{Term: 0})
+	rf.lastLogIndex = 0
+	rf.lastLogTerm = 0
+	rf.lastApplied = 0
+	rf.commitIndex = 0
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -360,6 +378,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 								if rf.votes >= len(rf.peers)/2+1 {
 									debug("%d becomes Leader for term %d\n", rf.me, term)
 									rf.state = Leader
+									rf.nextIndex = []int{}
+									rf.matchIndex = []int{}
+									for i := 0; i < len(rf.peers); i++ {
+										rf.nextIndex = append(rf.nextIndex, rf.lastLogIndex)
+										rf.matchIndex = append(rf.matchIndex, 0)
+									}
+
 									go rf.heartBeating(term)
 								}
 							}
@@ -402,16 +427,57 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+
+	// If RPC request or response contains term T > currentTerm: 
+	// set currentTerm = T, convert to follower
+	if args.Term > rf.currentTerm {
+		rf.currentTerm = args.Term
+		rf.state = Follower
+	}
+
+	reply.Term = rf.currentTerm
+
+	// 1. Reply false if term < currentTerm
 	if args.Term < rf.currentTerm {
-		reply.Term = rf.currentTerm
 		reply.Success = false
 		return
 	}
 
-	rf.currentTerm = args.Term
-	rf.state = Follower
-	reply.Term = rf.currentTerm
+	// Receive AppendEntries from current leader, reset timer 
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
+
+	// 2. Reply false if log doesn’t contain an entry at prevLogIndex 
+	// whose term matches prevLogTerm
+	if args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.Success = false
+		return
+	}
+
+	// 3. If an existing entry conflicts with a new one (same index
+	// but different terms), delete the existing entry and all that
+	// follow it
+	i := 0
+	for ; i < len(args.Entries); i++ {
+		newIndex := args.prevLogIndex + 1 + i
+		if newIndex >= len(rf.log) || rf.log[newIndex].Term != args.PrevLogTerm {
+			break
+		}
+	}
+
+	// 4. Append any new entries not already in the log
+	for ; i < len(args.Entries); i++ {
+		rf.log = append(rf.log, args.Entries[i])
+	}
+
+
+	// 5. If leaderCommit > commitIndex, 
+	// set commitIndex = min(leaderCommit, index of last new entry)
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1 )
+	}
+
+
+
 	reply.Success = true
 	return
 
@@ -419,9 +485,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 func (rf *Raft) heartBeating(term int) {
 	for {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) 	// a heartbeating per 100ms
 		rf.mu.Lock()
-		if rf.state == Leader && rf.currentTerm == term {
+		if rf.state == Leader && rf.currentTerm == term { // still the leader of current term
 			for server, _ := range rf.peers {
 				if server == rf.me {
 					continue
