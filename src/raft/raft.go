@@ -90,6 +90,8 @@ type Raft struct {
 	nextIndex 	[]int 
 	matchIndex 	[]int
 
+	Appendch 	[]chan bool
+
 }
 
 type LogEntry struct {
@@ -306,11 +308,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Send AppendEntries to all followers
 	for server, _ := range rf.peers {
-		go func(rf *Raft, server int) {
-			rf.mu.Lock()
-			//args := AppendEntriesArgs{rf.currentTerm, rf.me, } 
-			rf.mu.Unlock()
-		}(rf, server)
+		if server == rf.me {
+			continue
+		}
+		go func() {
+			rf.Appendch[server] <- true
+		}()
 	}
 
 
@@ -416,7 +419,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 									rf.nextIndex = []int{}
 									rf.matchIndex = []int{}
 									for i := 0; i < len(rf.peers); i++ {
-										rf.nextIndex = append(rf.nextIndex, rf.lastLogIndex)
+										rf.nextIndex = append(rf.nextIndex, rf.lastLogIndex+1)
 										rf.matchIndex = append(rf.matchIndex, 0)
 									}
 
@@ -518,48 +521,95 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 }
 
-func (rf *Raft) heartBeating(term int) {
+
+func (rf *Raft) sendAppendEntries(term int, server int) {
 	for {
-		time.Sleep(100 * time.Millisecond) 	// a heartbeating per 100ms
-		rf.mu.Lock()
-		if rf.state == Leader && rf.currentTerm == term { // still the leader of current term
-			for server, _ := range rf.peers {
-				if server == rf.me {
-					continue
-				}
-				go func(rf *Raft, server int, term int, leaderId int, prevLogIndex int, prevLogTerm int, leaderCommit int) {
-					args := AppendEntriesArgs{
-						Term:         term,
-						LeaderId:     leaderId,
-						PrevLogIndex: prevLogIndex,
-						PrevLogTerm:  prevLogTerm,
-						LeaderCommit: leaderCommit}
-					reply := AppendEntriesReply{}
-
-					rf.mu.Lock()
-					if rf.state != Leader {
-						rf.mu.Unlock()
-						return
-					}
-					rf.mu.Unlock()
-
-					ok := rf.peers[server].Call("Raft.AppendEntries", &args, &reply)
-					if ok && !reply.Success {
-						rf.mu.Lock()
-						if reply.Term > rf.currentTerm {
-							rf.state = Follower
-							rf.currentTerm = reply.Term
-						}
-						rf.mu.Unlock()
-					}
-				}(rf, server, rf.currentTerm, rf.me, 0, 0, 0)
-			}
-		} else {
-			rf.mu.Unlock()
+		_, chanOK := <- rf.Appendch[server]
+		if !chanOK {
 			return
 		}
-		rf.mu.Unlock()
+		ok := false
+		for !ok {
+			rf.mu.Lock()
+			if rf.state != Leader || rf.currentTerm != term {
+				rf.mu.Unlock()
+				return 
+			}
+			args := AppendEntriesArgs{
+				Term: 			rf.currentTerm,
+				LeaderId: 		rf.me,
+				PrevLogIndex: 	rf.nextIndex[server] - 1,
+				PrevLogTerm: 	rf.log[rf.nextIndex[server]-1].Term,
+				Entries: 		rf.log[rf.nextIndex[server]:],
+				LeaderCommit: 	rf.commitIndex }
+			reply := AppendEntriesReply{}
+			rf.mu.Unlock()
 
+			ok = rf.peers[server].Call("Raft.AppendEntries", &args, &reply)
+
+			rf.mu.Lock()
+			if rf.state != Leader || rf.currentTerm != term {
+				rf.mu.Unlock()
+				return 
+			}
+			if !ok {
+				rf.mu.Unlock()
+				continue
+			}
+
+			if reply.Success {
+				rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
+				rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+
+			} else {
+				
+				if reply.Term > rf.currentTerm {
+					rf.state = Follower
+					rf.currentTerm = reply.Term
+					rf.mu.Unlock()
+					return
+				}
+
+				if rf.nextIndex[server] > 0 {
+					rf.nextIndex[server]--
+					ok = false
+				}
+			}
+			rf.mu.Unlock()
+
+		}
+	}
+}
+
+
+func (rf *Raft) heartBeating(term int) {
+	rf.mu.Lock()
+	rf.Appendch = make([]chan bool, len(rf.peers))
+	for server, _ := range rf.peers {
+		if server == rf.me {
+			continue
+		}
+		rf.Appendch[server] = make(chan bool)
+		go func() {
+			rf.sendAppendEntries(term,server)
+		}()
+		go func() {
+			rf.Appendch[server] <- true
+		}()
+	}
+	rf.mu.Unlock()
+
+
+	for {
+		time.Sleep(100 * time.Millisecond) 	// a heartbeating per 100ms
+		for server, _ := range rf.peers {
+			if server == rf.me {
+				continue
+			}
+			go func() {
+				rf.Appendch[server] <- true
+			}()
+		}
 	}
 }
 
