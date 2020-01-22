@@ -219,7 +219,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// granting vote to candidate, then reset timer
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
-	
+
 	return
 }
 
@@ -281,20 +281,27 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term := -1
 	isLeader := (rf.state == Leader)
 
+	// Not the leader, just return 
 	if !isLeader {
 		return index, term, isLeader
 	}
 
 
+	// new log entry 
 	index = rf.lastLogIndex + 1
 	term = rf.currentTerm
 
+	// update lastLogIntex
+	rf.lastLogIndex++
+
+	// write to local log entries
 	if index >= cap(rf.log) {
 		rf.log = append(rf.log, LogEntry{term, command})
 	} else {
 		rf.log[index] = LogEntry{term, command}
 	}
 
+	// Send AppendEntries to all followers
 	for server, _ := range rf.peers {
 		go func(rf *Raft, server int) {
 			rf.mu.Lock()
