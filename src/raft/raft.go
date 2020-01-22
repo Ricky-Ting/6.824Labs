@@ -305,7 +305,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	for server, _ := range rf.peers {
 		go func(rf *Raft, server int) {
 			rf.mu.Lock()
-			args := AppendEntriesArgs{rf.currentTerm, rf.me, } 
+			//args := AppendEntriesArgs{rf.currentTerm, rf.me, } 
 			rf.mu.Unlock()
 		}(rf, server)
 	}
@@ -491,7 +491,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// follow it
 	i := 0
 	for ; i < len(args.Entries); i++ {
-		newIndex := args.prevLogIndex + 1 + i
+		newIndex := args.PrevLogIndex + 1 + i
 		if newIndex >= len(rf.log) || rf.log[newIndex].Term != args.PrevLogTerm {
 			break
 		}
@@ -561,6 +561,13 @@ func (rf *Raft) heartBeating(term int) {
 	}
 }
 
+
+func min(x, y int) int {
+	if x > y {
+		return x
+	}
+	return y
+}
 
 
 
