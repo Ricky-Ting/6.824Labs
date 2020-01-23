@@ -133,6 +133,13 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -316,9 +323,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		if server == rf.me {
 			continue
 		}
-		go func(server int) {
-			rf.Appendch[server] <- true
-		}(server)
+		//go func(server int) {
+		//	rf.Appendch[server] <- true
+		//}(server)
 	}
 
 
