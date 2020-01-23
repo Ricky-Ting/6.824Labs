@@ -22,6 +22,8 @@ import "labrpc"
 import "time"
 import "math/rand"
 import "fmt"
+import "bytes"
+import "labgob"
 
 // import "bytes"
 // import "labgob"
@@ -167,12 +169,14 @@ func (rf *Raft) readPersist(data []byte) {
 	var currentTerm int 
 	var votedFor int 
 	var log []LogEntry
-	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) || d.Decode(&log) {
+	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
 		fmt.Println("readPersist: decode error")
 	} else {
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.log = log
+		rf.lastLogIndex = len(log) - 1 
+		rf.lastLogTerm = log[rf.lastLogIndex].Term
 	}
 
 }
@@ -333,6 +337,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.log[index] = LogEntry{term, command}
 	}
 
+	rf.persist()
 	// Send AppendEntries to all followers
 	for server, _ := range rf.peers {
 		if server == rf.me {
@@ -343,7 +348,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		//}(server)
 	}
 
-	rf.persist()
+	
 
 	return index, term, isLeader
 }
