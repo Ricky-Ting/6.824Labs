@@ -162,6 +162,19 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int 
+	var votedFor int 
+	var log []LogEntry
+	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) || d.Decode(&log) {
+		fmt.Println("readPersist: decode error")
+	} else {
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = log
+	}
+
 }
 
 //
@@ -204,6 +217,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.votedFor = -1
 		rf.currentTerm = args.Term
 		rf.state = Follower
+		rf.persist()
 	}
 
 	reply.Term = rf.currentTerm
@@ -232,6 +246,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// 4. Otherwise reply true
 	reply.VoteGranted = true
 	rf.votedFor = args.CandidateId
+	rf.persist()
 
 	// granting vote to candidate, then reset timer
 	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
@@ -328,6 +343,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		//}(server)
 	}
 
+	rf.persist()
 
 	return index, term, isLeader
 }
@@ -408,6 +424,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.state = Candidate
 				rf.votes = 1
 				rf.votedFor = rf.me
+				rf.persist()
 
 				for server, _ := range rf.peers {
 					if server == rf.me {
@@ -437,6 +454,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 										rf.matchIndex = append(rf.matchIndex, 0)
 										rf.Appendch[i] = make(chan bool)
 									}
+									rf.persist()
 
 									// start heartbeating
 									go rf.heartBeating(term)
@@ -487,6 +505,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		rf.state = Follower
+		rf.persist()
 	}
 
 	reply.Term = rf.currentTerm
@@ -540,6 +559,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//fmt.Println(args.Entries)
 	debug("%d commitIndex %d\n", rf.me, rf.commitIndex)
 
+	rf.persist()
 	reply.Success = true
 	return
 
@@ -592,6 +612,7 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 				if reply.Term > rf.currentTerm {
 					rf.state = Follower
 					rf.currentTerm = reply.Term
+					rf.persist()
 					rf.mu.Unlock()
 					return
 				}
