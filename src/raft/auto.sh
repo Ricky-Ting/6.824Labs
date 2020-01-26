@@ -1,4 +1,4 @@
-for i in $(seq 1 100)
+for i in $(seq 1 10)
 do 
-	go test -run 2B >> out
+	go test >> out
 done
