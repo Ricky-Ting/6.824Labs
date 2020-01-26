@@ -353,9 +353,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		if server == rf.me {
 			continue
 		}
-		//go func(server int) {
-		//	rf.Appendch[server] <- true
-		//}(server)
+		go func(term, server int) {
+			rf.sendAppendEntries(term,server)
+		}(term, server)
 	}
 
 	
@@ -426,7 +426,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 
-	// Election Timeout :  300ms - 600ms
+	// Election Timeout :  500ms - 800ms
 	go func(rf *Raft) {
 		for {
 			rf.mu.Lock()
@@ -498,7 +498,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					}(rf, server, rf.currentTerm, rf.me, rf.lastLogTerm, rf.lastLogIndex)
 				}
 			}
-			rf.timeout = time.Now().Add(time.Millisecond * time.Duration(300+20*(rf.randGen.Int()%16)))
+			rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
 			rf.mu.Unlock()
 		}
 	}(rf)
@@ -560,18 +560,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				}
 			}
 		} else {
-			len := len(rf.log)
-			reply.ConflictTerm = rf.log[len-1].Term
-			for i := len-1; i >=0; i--{
-				if rf.log[i].Term == reply.ConflictTerm {
-					reply.ConflictIndex = i
-				} else {
-					break
-				}
-			}
-			if len == 1 {
-				reply.ConflictIndex = 1
-			}
+			reply.ConflictIndex = len(rf.log)
 		}
 		return
 	}
@@ -617,11 +606,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 
 func (rf *Raft) sendAppendEntries(term int, server int) {
-	for {
-		_, chanOK := <- rf.Appendch[server]
-		if !chanOK {
-			return
-		}
+	//for {
+	//	_, chanOK := <- rf.Appendch[server]
+	//	if !chanOK {
+	//		return
+	//	}
 		ok := false
 		for !ok {
 			rf.mu.Lock()
@@ -681,7 +670,7 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 			rf.mu.Unlock()
 
 		}
-	}
+	//}
 }
 
 
@@ -695,9 +684,11 @@ func (rf *Raft) heartBeating(term int) {
 		go func(term, server int) {
 			rf.sendAppendEntries(term,server)
 		}(term, server)
+		/*
 		go func(server int) {
 			rf.Appendch[server] <- true
 		}(server)
+		*/
 	}
 	go func(term int) {
 		rf.checkCommit(term)
@@ -717,9 +708,14 @@ func (rf *Raft) heartBeating(term int) {
 			if server == rf.me {
 				continue
 			}
+			/*
 			go func(server int) {
 				rf.Appendch[server] <- true
 			}(server)
+			*/
+			go func(term, server int) {
+				rf.sendAppendEntries(term,server)
+			}(term, server)
 		}
 	}
 }
