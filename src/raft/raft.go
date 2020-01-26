@@ -47,7 +47,7 @@ func debug(format string, a ...interface{}) (n int, err error) {
 
 func debugln(a ...interface{}) {
 	if DebugEnabled{
-		fmt.Println(a)
+		fmt.Println(a...)
 	}
 }
 //
@@ -96,6 +96,7 @@ type Raft struct {
 	lastApplied  int
 	lastLogIndex int 
 	lastLogTerm  int
+	shutdown bool
 
 	// Volatile state on master
 	nextIndex 	[]int 
@@ -185,8 +186,8 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.lastLogIndex = len(log) - 1 
 		rf.lastLogTerm = log[rf.lastLogIndex].Term
 	}
-	fmt.Printf("read %d persistence, currentTerm: %d, voteFor: %d \n", rf.me, rf.currentTerm, rf.votedFor)
-	fmt.Println(rf.log)
+	debug("read %d persistence, currentTerm: %d, voteFor: %d \n", rf.me, rf.currentTerm, rf.votedFor)
+	debugln(rf.log)
 
 }
 
@@ -370,6 +371,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.shutdown = true
 }
 
 //
@@ -398,6 +403,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.state = Follower
 	rf.currentTerm = 0
 	rf.votedFor = -1
+	rf.shutdown = false
 
 	// initial the random generator for election timeout 
 	// use current time and serverId to get the seed
@@ -430,6 +436,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			time.Sleep(dura) // Sleep for dura time, Sleep without holding the lock
 
 			rf.mu.Lock()
+			if rf.shutdown {
+				rf.mu.Unlock()
+				return
+			}
+
 			if rf.timeout.Before(time.Now()) && rf.state != Leader { 
 				// timeout and not the leader
 
@@ -595,7 +606,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 
 	debug("%d receive \n", rf.me)
-	//fmt.Println(args.Entries)
+	debugln(args.Entries)
 	debug("%d commitIndex %d\n", rf.me, rf.commitIndex)
 
 	rf.persist()
@@ -614,7 +625,7 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 		ok := false
 		for !ok {
 			rf.mu.Lock()
-			if rf.state != Leader || rf.currentTerm != term {
+			if rf.state != Leader || rf.currentTerm != term || rf.shutdown {
 				rf.mu.Unlock()
 				return 
 			}
@@ -629,7 +640,7 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 			rf.mu.Unlock()
 
 			debug("%d send AppendEntries to %d \n", rf.me, server)
-			//fmt.Println(args)
+			debugln(args)
 			ok = rf.peers[server].Call("Raft.AppendEntries", &args, &reply)
 
 			rf.mu.Lock()
@@ -696,6 +707,12 @@ func (rf *Raft) heartBeating(term int) {
 
 	for {
 		time.Sleep(100 * time.Millisecond) 	// a heartbeating per 100ms
+		rf.mu.Lock()
+		if rf.state != Leader || rf.currentTerm != term || rf.shutdown {
+			rf.mu.Unlock()
+			return 
+		}
+		rf.mu.Unlock()
 		for server, _ := range rf.peers {
 			if server == rf.me {
 				continue
@@ -713,7 +730,7 @@ func (rf *Raft) checkCommit(term int) {
 	for {
 		time.Sleep(50 * time.Millisecond)
 		rf.mu.Lock()
-		if rf.state != Leader || rf.currentTerm != term {
+		if rf.state != Leader || rf.currentTerm != term || rf.shutdown {
 			rf.mu.Unlock()
 			return
 		}
@@ -746,7 +763,7 @@ func (rf *Raft) checkCommit(term int) {
 func (rf *Raft) Apply() {
 	for {
 		rf.mu.Lock()
-		if rf.lastApplied == rf.commitIndex {
+		if rf.lastApplied == rf.commitIndex || rf.shutdown {
 			rf.mu.Unlock()
 			return
 		}
@@ -754,7 +771,7 @@ func (rf *Raft) Apply() {
 		rf.lastApplied++
 		rf.mu.Unlock()
 		debug("%d apply : \n", rf.me)
-		//fmt.Println(ApplyMsg{true, rf.log[apply].Command, apply})
+		debugln(ApplyMsg{true, rf.log[apply].Command, apply})
 		rf.applyCh <- ApplyMsg{true, rf.log[apply].Command, apply}
 		
 	}
