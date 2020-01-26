@@ -644,10 +644,14 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 					return
 				}
 
+				/*
 				if rf.nextIndex[server] > 0 {
 					rf.nextIndex[server]--
 					ok = false
 				}
+				*/
+				rf.nextIndex[server] = reply.ConflictIndex
+				ok = false
 			}
 			rf.mu.Unlock()
 
