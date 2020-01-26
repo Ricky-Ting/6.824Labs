@@ -530,6 +530,26 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// whose term matches prevLogTerm
 	if args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 		reply.Success = false
+		if args.PrevLogIndex < len(rf.log) {
+			reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
+			for i := args.PrevLogIndex; i >= 0; i-- {
+				if rf.log[i].Term == reply.ConflictTerm {
+					reply.ConflictIndex = i
+				} else {
+					break
+				}
+			}
+		} else {
+			len := len(rf.log)
+			reply.ConflictTerm = rf.log[len-1].Term
+			for i := len-1; i >=0; i--{
+				if rf.log[i].Term == reply.ConflictTerm {
+					reply.ConflictIndex = i
+				} else {
+					break
+				}
+			}
+		}
 		return
 	}
 
