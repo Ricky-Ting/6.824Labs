@@ -97,6 +97,7 @@ type Raft struct {
 	lastLogIndex int 
 	lastLogTerm  int
 	shutdown bool
+	applying bool
 
 	// Volatile state on master
 	nextIndex 	[]int 
@@ -404,6 +405,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.currentTerm = 0
 	rf.votedFor = -1
 	rf.shutdown = false
+	rf.applying = false
 
 	// initial the random generator for election timeout 
 	// use current time and serverId to get the seed
@@ -427,83 +429,85 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 
 	// Election Timeout :  500ms - 800ms
-	go func(rf *Raft) {
-		for {
-			rf.mu.Lock()
-			dura := time.Until(rf.timeout) // Get the duration from now to tiemout
-			rf.mu.Unlock()
-
-			time.Sleep(dura) // Sleep for dura time, Sleep without holding the lock
-
-			rf.mu.Lock()
-			if rf.shutdown {
-				rf.mu.Unlock()
-				return
-			}
-
-			if rf.timeout.Before(time.Now()) && rf.state != Leader { 
-				// timeout and not the leader
-
-				// Become candidate and vote for self
-				rf.currentTerm++
-				rf.state = Candidate
-				rf.votes = 1
-				rf.votedFor = rf.me
-				rf.persist()
-
-				for server, _ := range rf.peers {
-					if server == rf.me {
-						continue // Pass myself, since I have voted for myself
-					}
-					go func(rf *Raft, server int, term int, me int, lastLogTerm int, lastLogIndex int) {
-						args := RequestVoteArgs{term, me, lastLogTerm, lastLogIndex}
-						reply := RequestVoteReply{}
-						ok := rf.sendRequestVote(server, &args, &reply)
-						if ok && reply.VoteGranted {
-							rf.mu.Lock()
-							if rf.currentTerm == term && rf.state == Candidate {
-								// state doesn't change since RequestVote
-								rf.votes++
-
-								if rf.votes >= len(rf.peers)/2+1 {
-									// Only once
-									debug("%d becomes Leader for term %d with lastterm %d lastindex %d\n", rf.me, term, rf.lastLogTerm, rf.lastLogIndex)
-									rf.state = Leader
-									rf.thisTermFirst = rf.lastLogIndex + 1
-									// initialize nextIndex and matchIndex
-									rf.Appendch = make([]chan bool, len(rf.peers))
-									rf.nextIndex = []int{}
-									rf.matchIndex = []int{}
-									for i := 0; i < len(rf.peers); i++ {
-										rf.nextIndex = append(rf.nextIndex, rf.lastLogIndex+1)
-										rf.matchIndex = append(rf.matchIndex, 0)
-										rf.Appendch[i] = make(chan bool)
-									}
-									rf.persist()
-
-									// start heartbeating
-									go rf.heartBeating(term)
-								}
-							}
-
-							rf.mu.Unlock()
-						} else if ok && !reply.VoteGranted {
-							rf.mu.Lock()
-							if reply.Term > rf.currentTerm {
-								rf.currentTerm = reply.Term 
-								rf.state = Follower
-							}
-							rf.mu.Unlock()
-						}
-					}(rf, server, rf.currentTerm, rf.me, rf.lastLogTerm, rf.lastLogIndex)
-				}
-			}
-			rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
-			rf.mu.Unlock()
-		}
-	}(rf)
+	go rf.electionTimeout()
 
 	return rf
+}
+
+func (rf *Raft) electionTimeout() {
+	for {
+		rf.mu.Lock()
+		dura := time.Until(rf.timeout) // Get the duration from now to tiemout
+		rf.mu.Unlock()
+
+		time.Sleep(dura) // Sleep for dura time, Sleep without holding the lock
+
+		rf.mu.Lock()
+		if rf.shutdown {
+			rf.mu.Unlock()
+			return
+		}
+
+		if rf.timeout.Before(time.Now()) && rf.state != Leader { 
+			// timeout and not the leader
+
+			// Become candidate and vote for self
+			rf.currentTerm++
+			rf.state = Candidate
+			rf.votes = 1
+			rf.votedFor = rf.me
+			rf.persist()
+
+			for server, _ := range rf.peers {
+				if server == rf.me {
+					continue // Pass myself, since I have voted for myself
+				}
+				go func(rf *Raft, server int, term int, me int, lastLogTerm int, lastLogIndex int) {
+					args := RequestVoteArgs{term, me, lastLogTerm, lastLogIndex}
+					reply := RequestVoteReply{}
+					ok := rf.sendRequestVote(server, &args, &reply)
+					if ok && reply.VoteGranted {
+						rf.mu.Lock()
+						if rf.currentTerm == term && rf.state == Candidate {
+							// state doesn't change since RequestVote
+							rf.votes++
+
+							if rf.votes >= len(rf.peers)/2+1 {
+								// Only once
+								debug("%d becomes Leader for term %d with lastterm %d lastindex %d\n", rf.me, term, rf.lastLogTerm, rf.lastLogIndex)
+								rf.state = Leader
+								rf.thisTermFirst = rf.lastLogIndex + 1
+								// initialize nextIndex and matchIndex
+								//rf.Appendch = make([]chan bool, len(rf.peers))
+								rf.nextIndex = []int{}
+								rf.matchIndex = []int{}
+								for i := 0; i < len(rf.peers); i++ {
+									rf.nextIndex = append(rf.nextIndex, rf.lastLogIndex+1)
+									rf.matchIndex = append(rf.matchIndex, 0)
+									//rf.Appendch[i] = make(chan bool)
+								}
+								rf.persist()
+
+								// start heartbeating
+								go rf.heartBeating(term)
+							}
+						}
+
+						rf.mu.Unlock()
+					} else if ok && !reply.VoteGranted {
+						rf.mu.Lock()
+						if reply.Term > rf.currentTerm {
+							rf.currentTerm = reply.Term 
+							rf.state = Follower
+						}
+						rf.mu.Unlock()
+					}
+				}(rf, server, rf.currentTerm, rf.me, rf.lastLogTerm, rf.lastLogIndex)
+			}
+		}
+		rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
+		rf.mu.Unlock()
+	}
 }
 
 type AppendEntriesArgs struct {
@@ -628,8 +632,7 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 			reply := AppendEntriesReply{}
 			rf.mu.Unlock()
 
-			debug("%d send AppendEntries to %d \n", rf.me, server)
-			debugln(args)
+			debugln(rf.me, " send AppendEntries to ", server, " with ", args)
 			ok = rf.peers[server].Call("Raft.AppendEntries", &args, &reply)
 
 			rf.mu.Lock()
@@ -738,7 +741,7 @@ func (rf *Raft) checkCommit(term int) {
 
 		cnt := 0
 		for server, _ := range rf.peers {
-			if server == rf.me {
+			if server == rf.me && len(rf.log) > cur {
 				cnt++
 				continue
 			}
@@ -763,12 +766,23 @@ func (rf *Raft) Apply() {
 			rf.mu.Unlock()
 			return
 		}
+		if rf.applying {
+			rf.mu.Unlock()
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
 		apply := rf.lastApplied + 1
 		rf.lastApplied++
+		rf.applying = true
 		rf.mu.Unlock()
-		debug("%d apply : \n", rf.me)
-		debugln(ApplyMsg{true, rf.log[apply].Command, apply})
+
+		debugln(rf.me, " apply: ", ApplyMsg{true, rf.log[apply].Command, apply})
 		rf.applyCh <- ApplyMsg{true, rf.log[apply].Command, apply}
+
+		rf.mu.Lock()
+		rf.applying = false
+		rf.mu.Unlock()
+
 		
 	}
 } 
