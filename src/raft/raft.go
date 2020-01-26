@@ -35,13 +35,20 @@ const (
 )
 
 
-const debugEnabled = false
+var DebugEnabled bool = false
 
 func debug(format string, a ...interface{}) (n int, err error) {
-	if debugEnabled {
+	if DebugEnabled {
 		n, err = fmt.Printf(format, a...)
 	}
 	return
+}
+
+
+func debugln(a ...interface{}) {
+	if DebugEnabled{
+		fmt.Println(a)
+	}
 }
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -178,6 +185,8 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.lastLogIndex = len(log) - 1 
 		rf.lastLogTerm = log[rf.lastLogIndex].Term
 	}
+	fmt.Printf("read %d persistence, currentTerm: %d, voteFor: %d \n", rf.me, rf.currentTerm, rf.votedFor)
+	fmt.Println(rf.log)
 
 }
 
@@ -549,6 +558,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					break
 				}
 			}
+			if len == 1 {
+				reply.ConflictIndex = 1
+			}
 		}
 		return
 	}
@@ -650,8 +662,10 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 					ok = false
 				}
 				*/
+				
 				rf.nextIndex[server] = reply.ConflictIndex
 				ok = false
+				
 			}
 			rf.mu.Unlock()
 
