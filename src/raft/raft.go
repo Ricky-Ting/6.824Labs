@@ -646,8 +646,9 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 			}
 
 			if reply.Success {
-				rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
-				rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+				// I currently doubt whether it is safe to maximize the value
+				rf.nextIndex[server] = max(rf.nextIndex[server], args.PrevLogIndex + len(args.Entries) + 1)
+				rf.matchIndex[server] = max(rf.matchIndex[server], args.PrevLogIndex + len(args.Entries))
 
 			} else {
 				
@@ -774,10 +775,11 @@ func (rf *Raft) Apply() {
 		apply := rf.lastApplied + 1
 		rf.lastApplied++
 		rf.applying = true
+		applymsg := ApplyMsg{true, rf.log[apply].Command, apply}
 		rf.mu.Unlock()
 
-		debugln(rf.me, " apply: ", ApplyMsg{true, rf.log[apply].Command, apply})
-		rf.applyCh <- ApplyMsg{true, rf.log[apply].Command, apply}
+		debugln(rf.me, " apply: ", applymsg)
+		rf.applyCh <- applymsg
 
 		rf.mu.Lock()
 		rf.applying = false
@@ -795,5 +797,11 @@ func min(x, y int) int {
 	return y
 }
 
+func max(x, y int) int {
+	if x > y {
+		return x
+	}
+	return y
+}
 
 
