@@ -627,8 +627,10 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 				LeaderId: 		rf.me,
 				PrevLogIndex: 	rf.nextIndex[server] - 1,
 				PrevLogTerm: 	rf.log[rf.nextIndex[server]-1].Term,
-				Entries: 		rf.log[rf.nextIndex[server]:],
+				//Entries: 		rf.log[rf.nextIndex[server]:],
 				LeaderCommit: 	rf.commitIndex }
+			args.Entries = make([]LogEntry, len(rf.log[rf.nextIndex[server]:]), len(rf.log[rf.nextIndex[server]:]))
+			copy(args.Entries, rf.log[rf.nextIndex[server]:])
 			reply := AppendEntriesReply{}
 			rf.mu.Unlock()
 
