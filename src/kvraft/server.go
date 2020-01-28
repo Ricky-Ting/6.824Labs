@@ -52,12 +52,17 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 	reply.WrongLeader = false
 	kv.mu.Unlock()
-	
-	
+
+
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+}
+
+
+func (kv *KVserver) Apply() {
+
 }
 
 //
@@ -99,6 +104,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+
+	go kv.Apply()
 
 	// You may need initialization code here.
 
