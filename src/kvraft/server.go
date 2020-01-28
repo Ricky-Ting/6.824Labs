@@ -42,6 +42,18 @@ type KVServer struct {
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	kv.mu.Lock()
+	cmd := Op{"Get", args.Key, ""}
+	index, term, isLeader := kv.rf.Start(cmd)
+	if !isLeader {
+		reply.WrongLeader = true
+		kv.mu.Unlock()
+		return
+	}
+	reply.WrongLeader = false
+	kv.mu.Unlock()
+	
+	
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
