@@ -63,6 +63,7 @@ func (ck *Clerk) Get(key string) string {
 			ret = reply.value
 			ck.lastMaster = curLeader
 			ck.mu.Unlock()
+			break
 		}
 		curLeader = (curLeader + 1) % ck.nServers
 	}
