@@ -82,7 +82,26 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
-	
+	ck.mu.Lock()
+	curLeader := ck.lastMaster
+	ck.mu.Unlock()
+
+	for i := 0; i < ck.nServers; i++ {
+		ck.mu.Lock()
+		args := PutAppendArgs{key, value, ck.cid, ck.lastRequseId + 1}
+		reply := PutAppendReply{}
+		ck.mu.Unlock()
+		ok := ck.servers[curLeader].Call("KVServer.PutAppend", &args, &reply)
+		if ok && !reply.WrongLeader {
+			ck.mu.Lock()
+			ck.lastMaster = curLeader
+			ck.mu.Unlock()
+			break
+		}
+		curLeader = (curLeader + 1) % ck.nServers
+	}
+
+	return
 }
 
 func (ck *Clerk) Put(key string, value string) {
