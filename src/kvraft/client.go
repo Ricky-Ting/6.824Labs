@@ -46,12 +46,28 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
+	ret := ""
+	
+	ck.mu.Lock()
+	curLeader := ck.lastMaster
+	ck.mu.Unlock()
 
 	for i := 0; i < ck.nServers; i++ {
-		ok := ck.servers[(ck.lastMaster+i)%ck.nServers].Call("KVServer.Get", &args, &reply)
+		ck.mu.Lock()
+		args := GetArgs{key, ck.cid, ck.lastRequseId + 1}
+		reply := GetReply{}
+		ck.mu.Unlock()
+		ok := ck.servers[curLeader].Call("KVServer.Get", &args, &reply)
+		if ok && !reply.WrongLeader {
+			ck.mu.Lock()
+			ret = reply.value
+			ck.lastMaster = curLeader
+			ck.mu.Unlock()
+		}
+		curLeader = (curLeader + 1) % ck.nServers
 	}
 
-	return ""
+	return ret
 }
 
 //
@@ -66,6 +82,7 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+	
 }
 
 func (ck *Clerk) Put(key string, value string) {
