@@ -8,8 +8,11 @@ import "math/big"
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	mu      sync.Mutex
 	lastMaster 	int 	// latest master
 	nServers  	int 	// number of servers
+	cid			int 	// Server's Id
+	lastRequseId int 	// lastest Request ID
 }
 
 func nrand() int64 {
@@ -43,6 +46,11 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
+
+	for i := 0; i < ck.nServers; i++ {
+		ok := ck.servers[(ck.lastMaster+i)%ck.nServers].Call("KVServer.Get", &args, &reply)
+	}
+
 	return ""
 }
 
