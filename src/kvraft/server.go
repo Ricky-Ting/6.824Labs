@@ -33,6 +33,7 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	database map[string]string
 }
 
 
