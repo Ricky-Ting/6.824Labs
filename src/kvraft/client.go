@@ -8,6 +8,8 @@ import "math/big"
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	lastMaster 	int 	// latest master
+	nServers  	int 	// number of servers
 }
 
 func nrand() int64 {
