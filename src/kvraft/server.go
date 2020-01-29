@@ -95,7 +95,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 
 func (kv *KVserver) Apply() {
-	for msg := <- kv.applyCh {
+	for msg := range kv.applyCh {
 		kv.applyCond.L.Lock()
 		for kv.lastApply != -1 {
 			kv.applyCond.Wait()
