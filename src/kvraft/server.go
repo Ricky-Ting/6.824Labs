@@ -71,6 +71,26 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	kv.mu.Lock()
+	cmd := Op{args.Op, args.Key, args.Value}
+	index, term, isLeader := kv.rf.Start(cmd)
+	if !isLeader {
+		reply.WrongLeader = true
+		kv.mu.Unlock()
+		return
+	}
+	reply.WrongLeader = false
+	kv.mu.Unlock()
+
+	kv.applyCond.L.Lock()
+	for kv.lastApply != index {
+		kv.applyCond.Wait()
+	}
+	kv.database[args.Key] = kv.database[args.Key] + args.Value
+	kv.lastApply = -1
+	kv.applyCond.L.Unlock()
+
+	return
 }
 
 
