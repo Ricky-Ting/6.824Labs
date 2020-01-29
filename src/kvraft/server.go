@@ -41,6 +41,7 @@ type KVServer struct {
 	applyCond 	*sync.Cond
 	lastApply 	int
 	lastOp 		Op
+	lastTerm 	int
 }
 
 
@@ -56,11 +57,18 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 	reply.WrongLeader = false
 	kv.mu.Unlock()
-
+	DPrintf("In server Get %s \n", args.Key)
 	kv.applyCond.L.Lock()
 	for kv.lastApply != index {
 		kv.applyCond.Wait()
 	}
+	if kv.lastOp != cmd {
+		reply.WrongLeader = true
+		kv.lastApply = -1
+		kv.applyCond.L.Unlock()
+		return
+	}
+
 	reply.Value = kv.database[args.Key]
 	kv.lastApply = -1
 	kv.applyCond.L.Unlock()
@@ -82,12 +90,22 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 	reply.WrongLeader = false
 	kv.mu.Unlock()
-
+	DPrintf("In server %s %s %s \n", args.Op, args.Key, args.Value)
 	kv.applyCond.L.Lock()
 	for kv.lastApply != index {
 		kv.applyCond.Wait()
 	}
-	kv.database[args.Key] = kv.database[args.Key] + args.Value
+	if kv.lastOp != cmd {
+		reply.WrongLeader = true
+		kv.lastApply = -1
+		kv.applyCond.L.Unlock()
+		return
+	}
+	if args.Op == "Append"{
+		kv.database[args.Key] = kv.database[args.Key] + args.Value
+	} else {
+		kv.database[args.Key] = args.Value
+	}
 	kv.lastApply = -1
 	kv.applyCond.L.Unlock()
 
@@ -103,6 +121,7 @@ func (kv *KVServer) Apply() {
 			kv.applyCond.Wait()
 		}
 		kv.lastApply = msg.CommandIndex
+		kv.lastTerm = msg.CommandTerm
 		if kv.lastOp, ok = msg.Command.(Op); ok {
 
 		} else {
