@@ -56,13 +56,13 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	reply.WrongLeader = false
 	kv.mu.Unlock()
 
-	kv.applyCond.Lock()
+	kv.applyCond.L.Lock()
 	for kv.lastApply != index {
 		kv.applyCond.Wait()
 	}
 	reply.Value = kv.database[args.Key]
 	kv.lastApply = -1
-	kv.applyCond.Unlock()
+	kv.applyCond.L.Unlock()
 
 	return
 
