@@ -39,6 +39,7 @@ type KVServer struct {
 	database map[string]string
 	applyCond 	*sync.Cond
 	lastApply 	int
+	lastOp 		Op
 }
 
 
@@ -74,7 +75,16 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 
 func (kv *KVserver) Apply() {
-
+	for msg := <- kv.applyCh {
+		kv.applyCond.L.Lock()
+		for kv.lastApply != -1 {
+			kv.applyCond.Wait()
+		}
+		kv.lastApply = msg.CommandIndex
+		kv.lastOp = msg.Command
+		kv.applyCond.Broadcast()
+		kv.applyCond.L.Unlock()
+	}
 }
 
 //
