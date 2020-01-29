@@ -6,6 +6,7 @@ import (
 	"log"
 	"raft"
 	"sync"
+	"fmt"
 )
 
 const Debug = 0
@@ -47,7 +48,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.mu.Lock()
 	cmd := Op{"Get", args.Key, ""}
-	index, term, isLeader := kv.rf.Start(cmd)
+	index, _, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
 		kv.mu.Unlock()
@@ -73,7 +74,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	kv.mu.Lock()
 	cmd := Op{args.Op, args.Key, args.Value}
-	index, term, isLeader := kv.rf.Start(cmd)
+	index, _, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
 		kv.mu.Unlock()
@@ -94,14 +95,19 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 
-func (kv *KVserver) Apply() {
+func (kv *KVServer) Apply() {
+	var ok bool
 	for msg := range kv.applyCh {
 		kv.applyCond.L.Lock()
 		for kv.lastApply != -1 {
 			kv.applyCond.Wait()
 		}
 		kv.lastApply = msg.CommandIndex
-		kv.lastOp = msg.Command
+		if kv.lastOp, ok = msg.Command.(Op); ok {
+
+		} else {
+			fmt.Println("In Apply: type error")
+		}
 		kv.applyCond.Broadcast()
 		kv.applyCond.L.Unlock()
 	}
