@@ -778,7 +778,7 @@ func (rf *Raft) Apply() {
 		apply := rf.lastApplied + 1
 		rf.lastApplied++
 		rf.applying = true
-		applymsg := ApplyMsg{true, rf.log[apply].Command, apply}
+		applymsg := ApplyMsg{true, rf.log[apply].Command, apply, rf.log[apply].Term}
 		rf.mu.Unlock()
 
 		debugln(rf.me, " apply: ", applymsg)
