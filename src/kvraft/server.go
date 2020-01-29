@@ -37,6 +37,7 @@ type KVServer struct {
 
 	// Your definitions here.
 	database map[string]string
+	applyCond 	*sync.Cond
 }
 
 
