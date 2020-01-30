@@ -64,6 +64,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	if args.RequestId <= kv.lastRequestID[args.Cid] {
 		reply.WrongLeader = false
 		reply.Value = kv.lastResponse[args.Cid]
+		DPrintln("In server Get complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
 	}
@@ -91,9 +92,9 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		curTerm, curIsLeader := kv.rf.GetState()
 		if curTerm != term || !curIsLeader {
 			delete(kv.waitRequest, index)
-			kv.applyCond.Broadcast()
 			//kv.waitRequest[index] = 0
 			reply.WrongLeader = true
+			kv.applyCond.Broadcast()
 			DPrintf("In server Get %d not leader any more index %d failed", kv.me, index)
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
@@ -103,10 +104,10 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 	if kv.Request[index] != cmd {
 		delete(kv.waitRequest, index)
-		kv.applyCond.Broadcast()
 		//kv.waitRequest[index] = 0
 		reply.WrongLeader = true
 		DPrintf("In server Get index %d not origin", index)
+		kv.applyCond.Broadcast()
 		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
 		return
@@ -131,6 +132,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	if args.RequestId <= kv.lastRequestID[args.Cid] {
 		reply.WrongLeader = false
 		//reply.Value = lastResponse[args.Cid]
+		DPrintln("In server PutAppend complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
 	}
@@ -223,14 +225,15 @@ func (kv *KVServer) Apply() {
 		if !ok {
 			fmt.Println("In Apply: type error")
 		}
-
+		kv.Request[index] = op 
 		if op.RequestId > kv.lastRequestID[op.Cid] {
 			kv.lastRequestID[op.Cid] = op.RequestId
-			kv.Request[index] = op 
+			
+			DPrintln(" Server ", kv.me, " Apply  ", msg)
 			if op.OpType == "Append" {
 				kv.database[op.Key] = kv.database[op.Key] + op.Value
 			} else if op.OpType == "Put" {
-				//DPrintln(" Server Apply  ", msg)
+				
 				kv.database[op.Key] = op.Value
 			} else {
 				kv.lastResponse[op.Cid] = kv.database[op.Key]
