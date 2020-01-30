@@ -491,6 +491,7 @@ func (rf *Raft) electionTimeout() {
 
 								// start heartbeating
 								go rf.heartBeating(term)
+								go rf.Start(nil)
 							}
 						}
 
@@ -778,12 +779,17 @@ func (rf *Raft) Apply() {
 		apply := rf.lastApplied + 1
 		rf.lastApplied++
 		rf.applying = true
-		applymsg := ApplyMsg{true, rf.log[apply].Command, apply, rf.log[apply].Term}
+		applymsg := ApplyMsg{}
+		if rf.log[apply].Command == nil {
+			applymsg = ApplyMsg{false, rf.log[apply].Command, apply, rf.log[apply].Term}
+		} else {
+			applymsg = ApplyMsg{true, rf.log[apply].Command, apply, rf.log[apply].Term}
+		}
 		rf.mu.Unlock()
 
 		debugln(rf.me, " apply: ", applymsg)
 		rf.applyCh <- applymsg
-
+		debugln(rf.me, " apply: ", applymsg, "Done")
 		rf.mu.Lock()
 		rf.applying = false
 		rf.mu.Unlock()
