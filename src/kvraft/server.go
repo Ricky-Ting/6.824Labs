@@ -58,7 +58,7 @@ type KVServer struct {
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	DPrintf("In server Receive %s \n", args.Key)
+	//DPrintf("In server Receive %s \n", args.Key)
 	kv.mu.Lock()
 	
 	if args.RequestId <= kv.lastRequestID[args.Cid] {
@@ -77,9 +77,9 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 	reply.WrongLeader = false
 	kv.waitRequest[index] = 1
+	DPrintf("In server %d Get %s index = %d \n", kv.me, args.Key, index)
 	kv.mu.Unlock()
 
-	DPrintf("In server Get %s \n", args.Key)
 
 	kv.applyCond.L.Lock()
 	kv.mu.Lock()
@@ -91,7 +91,10 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		curTerm, curIsLeader := kv.rf.GetState()
 		if curTerm != term || !curIsLeader {
 			delete(kv.waitRequest, index)
+			kv.applyCond.Broadcast()
+			//kv.waitRequest[index] = 0
 			reply.WrongLeader = true
+			DPrintf("In server Get %d not leader any more index %d failed", kv.me, index)
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return 
@@ -100,7 +103,10 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 	if kv.Request[index] != cmd {
 		delete(kv.waitRequest, index)
+		kv.applyCond.Broadcast()
+		//kv.waitRequest[index] = 0
 		reply.WrongLeader = true
+		DPrintf("In server Get index %d not origin", index)
 		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
 		return
@@ -108,6 +114,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 	delete(kv.waitRequest, index)
 	reply.Value = kv.lastResponse[args.Cid]
+	DPrintln("In server Get complete ", index)
 	kv.applyCond.Broadcast()
 	kv.mu.Unlock()
 	kv.applyCond.L.Unlock()
@@ -139,7 +146,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.waitRequest[index] = 1
 	kv.mu.Unlock()
 
-	DPrintln("In server ", args, " index = ", index)
+	DPrintln("In server ", kv.me, " ", args, " index = ", index)
 
 	kv.applyCond.L.Lock()
 	kv.mu.Lock()
@@ -153,7 +160,9 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		curTerm, curIsLeader := kv.rf.GetState()
 		if curTerm != term || !curIsLeader {
 			delete(kv.waitRequest, index)
+			kv.applyCond.Broadcast()
 			reply.WrongLeader = true
+			DPrintf("In server PutAppend %d not leader any more index %d failed", kv.me, index)
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return 
@@ -161,16 +170,19 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	}
 
-	DPrintln("In server PutAppend", kv.Request[index] )
+	
 	if kv.Request[index] != cmd {
 		delete(kv.waitRequest, index)
+		kv.applyCond.Broadcast()
 		reply.WrongLeader = true
+		DPrintf("In server PutAppend index %d not origin", index)
 		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
 		return
 	}
 	delete(kv.waitRequest, index)
 
+	DPrintln("In server PutAppend complete ", index)
 	kv.applyCond.Broadcast()
 	kv.mu.Unlock()
 	kv.applyCond.L.Unlock()
@@ -181,7 +193,27 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 func (kv *KVServer) Apply() {
 	for msg := range kv.applyCh {
-		DPrintln(" Server Apply receive ", msg)
+		DPrintln(" Server ", kv.me, " Apply receive ", msg)
+		if !msg.CommandValid {
+			kv.applyCond.L.Lock()
+			kv.mu.Lock()
+
+			index := msg.CommandIndex
+			kv.Request[index] = Op{}
+
+			kv.applyCond.Broadcast()
+			for kv.waitRequest[index] == 1 {
+				kv.mu.Unlock()
+				kv.applyCond.Wait()
+				kv.mu.Lock()
+			}
+
+			delete(kv.Request, index)
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			continue
+		}
+
 		kv.applyCond.L.Lock()
 		kv.mu.Lock()
 
@@ -198,7 +230,7 @@ func (kv *KVServer) Apply() {
 			if op.OpType == "Append" {
 				kv.database[op.Key] = kv.database[op.Key] + op.Value
 			} else if op.OpType == "Put" {
-				DPrintln(" Server Apply  ", msg)
+				//DPrintln(" Server Apply  ", msg)
 				kv.database[op.Key] = op.Value
 			} else {
 				kv.lastResponse[op.Cid] = kv.database[op.Key]

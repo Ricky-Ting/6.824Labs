@@ -4,6 +4,7 @@ import "labrpc"
 import "crypto/rand"
 import "math/big"
 import "sync"
+//import "fmt"
 
 
 type Clerk struct {
@@ -60,7 +61,7 @@ func (ck *Clerk) Get(key string) string {
 	ck.lastRequseId++
 	ck.mu.Unlock()
 
-	for i := 0; ; i++ {
+	for {
 		reply := GetReply{}
 		ok := ck.servers[curLeader].Call("KVServer.Get", &args, &reply)
 		if ok && !reply.WrongLeader {
@@ -68,10 +69,12 @@ func (ck *Clerk) Get(key string) string {
 			ret = reply.Value
 			ck.lastMaster = curLeader
 			ck.mu.Unlock()
+			//fmt.Println("Succeed in client Get ", args, " ", reply)
 			break
 		}
 		curLeader = (curLeader + 1) % ck.nServers
 	}
+	//fmt.Println("Succeed in client Gett ", args)
 
 	return ret
 }
@@ -97,20 +100,20 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	ck.lastRequseId++
 	ck.mu.Unlock()
 
-	for i := 0; ; i++ {
-		
+	for {
 		reply := PutAppendReply{}
-
 		ok := ck.servers[curLeader].Call("KVServer.PutAppend", &args, &reply)
 		if ok && !reply.WrongLeader {
 			ck.mu.Lock()
 			ck.lastMaster = curLeader
+			//fmt.Println("Succeed in client PutAppend ", args, " ", reply)
 			ck.mu.Unlock()
 			break
 		}
 		curLeader = (curLeader + 1) % ck.nServers
 	}
 
+	//fmt.Println("Succeed in client PutAppenddd ", args, " ")
 	return
 }
 
