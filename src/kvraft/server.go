@@ -18,14 +18,23 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+func DPrintln(a ...interface{}) (n int, err error) {
+	if Debug > 0 {
+		log.Println(a...)
+	}
+	return
+}
+
 
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
-	OpType 	string
-	Key 	string
-	Value 	string
+	Cid 		int64 	// Clerk's Id
+	RequestId 	int 	// Request's Id
+	OpType 		string
+	Key 		string
+	Value 		string
 }
 
 type KVServer struct {
@@ -37,40 +46,70 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	database map[string]string
+	database 	map[string]string
 	applyCond 	*sync.Cond
-	lastApply 	int
-	lastOp 		Op
-	lastTerm 	int
+	lastRequestID map[int64]int // Record latest request for different clerks
+	lastResponse map[int64]string // Record latest response for different clerks
+	waitRequest map[int]int  // map[index] = 0, 1 : whether a goroutine wait for index
+	Request 	map[int]Op 	 // map[index] = Op
+
 }
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	DPrintf("In server Receive %s \n", args.Key)
 	kv.mu.Lock()
-	cmd := Op{"Get", args.Key, ""}
-	index, _, isLeader := kv.rf.Start(cmd)
+	
+	if args.RequestId <= kv.lastRequestID[args.Cid] {
+		reply.WrongLeader = false
+		reply.Value = kv.lastResponse[args.Cid]
+		kv.mu.Unlock()
+		return 
+	}
+
+	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, ""}
+	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
 		kv.mu.Unlock()
 		return
 	}
 	reply.WrongLeader = false
+	kv.waitRequest[index] = 1
 	kv.mu.Unlock()
+
 	DPrintf("In server Get %s \n", args.Key)
+
 	kv.applyCond.L.Lock()
-	for kv.lastApply != index {
+	kv.mu.Lock()
+	for _, ok := kv.Request[index]; !ok; _, ok = kv.Request[index]  {
+		kv.mu.Unlock()
 		kv.applyCond.Wait()
+		kv.mu.Lock()
+
+		curTerm, curIsLeader := kv.rf.GetState()
+		if curTerm != term || !curIsLeader {
+			delete(kv.waitRequest, index)
+			reply.WrongLeader = true
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
+
 	}
-	if kv.lastOp != cmd {
+	if kv.Request[index] != cmd {
+		delete(kv.waitRequest, index)
 		reply.WrongLeader = true
-		kv.lastApply = -1
+		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
 		return
 	}
 
-	reply.Value = kv.database[args.Key]
-	kv.lastApply = -1
+	delete(kv.waitRequest, index)
+	reply.Value = kv.lastResponse[args.Cid]
+	kv.applyCond.Broadcast()
+	kv.mu.Unlock()
 	kv.applyCond.L.Unlock()
 
 	return
@@ -80,33 +119,60 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	//DPrintln("In server receive ", args)
 	kv.mu.Lock()
-	cmd := Op{args.Op, args.Key, args.Value}
-	index, _, isLeader := kv.rf.Start(cmd)
+	if args.RequestId <= kv.lastRequestID[args.Cid] {
+		reply.WrongLeader = false
+		//reply.Value = lastResponse[args.Cid]
+		kv.mu.Unlock()
+		return 
+	}
+
+	cmd := Op{args.Cid, args.RequestId, args.Op, args.Key, args.Value}
+	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
 		kv.mu.Unlock()
 		return
 	}
 	reply.WrongLeader = false
+	kv.waitRequest[index] = 1
 	kv.mu.Unlock()
-	DPrintf("In server %s %s %s \n", args.Op, args.Key, args.Value)
+
+	DPrintln("In server ", args, " index = ", index)
+
 	kv.applyCond.L.Lock()
-	for kv.lastApply != index {
+	kv.mu.Lock()
+	for _, ok := kv.Request[index]; !ok; _, ok = kv.Request[index]  {
+		//DPrintln("In server Put ", v, " ", ok)
+		kv.mu.Unlock()
 		kv.applyCond.Wait()
+		kv.mu.Lock()
+
+		//DPrintln("In server PutAppend", kv.Request[index] )
+		curTerm, curIsLeader := kv.rf.GetState()
+		if curTerm != term || !curIsLeader {
+			delete(kv.waitRequest, index)
+			reply.WrongLeader = true
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
+
 	}
-	if kv.lastOp != cmd {
+
+	DPrintln("In server PutAppend", kv.Request[index] )
+	if kv.Request[index] != cmd {
+		delete(kv.waitRequest, index)
 		reply.WrongLeader = true
-		kv.lastApply = -1
+		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
 		return
 	}
-	if args.Op == "Append"{
-		kv.database[args.Key] = kv.database[args.Key] + args.Value
-	} else {
-		kv.database[args.Key] = args.Value
-	}
-	kv.lastApply = -1
+	delete(kv.waitRequest, index)
+
+	kv.applyCond.Broadcast()
+	kv.mu.Unlock()
 	kv.applyCond.L.Unlock()
 
 	return
@@ -114,21 +180,45 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 
 func (kv *KVServer) Apply() {
-	var ok bool
 	for msg := range kv.applyCh {
+		DPrintln(" Server Apply receive ", msg)
 		kv.applyCond.L.Lock()
-		for kv.lastApply != -1 {
-			kv.applyCond.Wait()
-		}
-		kv.lastApply = msg.CommandIndex
-		kv.lastTerm = msg.CommandTerm
-		if kv.lastOp, ok = msg.Command.(Op); ok {
+		kv.mu.Lock()
 
-		} else {
+		index := msg.CommandIndex
+		//term := msg.CommandTerm
+		op, ok := msg.Command.(Op)
+		if !ok {
 			fmt.Println("In Apply: type error")
 		}
+
+		if op.RequestId > kv.lastRequestID[op.Cid] {
+			kv.lastRequestID[op.Cid] = op.RequestId
+			kv.Request[index] = op 
+			if op.OpType == "Append" {
+				kv.database[op.Key] = kv.database[op.Key] + op.Value
+			} else if op.OpType == "Put" {
+				DPrintln(" Server Apply  ", msg)
+				kv.database[op.Key] = op.Value
+			} else {
+				kv.lastResponse[op.Cid] = kv.database[op.Key]
+			}
+		}
+
 		kv.applyCond.Broadcast()
+
+		//DPrintln(kv.Request[index])
+
+		for kv.waitRequest[index] == 1 {
+			kv.mu.Unlock()
+			kv.applyCond.Wait()
+			kv.mu.Lock()
+		}
+
+		delete(kv.Request, index)
+		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
+		
 	}
 }
 
@@ -169,14 +259,22 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	kv.database = make(map[string]string)
 	kv.applyCond = sync.NewCond(new(sync.Mutex))
-	kv.lastApply = -1
+	kv.lastRequestID = make(map[int64]int)
+	kv.lastResponse = make(map[int64]string)
+	kv.waitRequest = make(map[int]int)
+	kv.Request = make(map[int]Op)
+	
 
 	kv.applyCh = make(chan raft.ApplyMsg)
+	
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	go kv.Apply()
+	
 
 	// You may need initialization code here.
+	
+
+	go kv.Apply()
 
 	return kv
 }

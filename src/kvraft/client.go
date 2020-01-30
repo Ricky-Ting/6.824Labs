@@ -12,7 +12,7 @@ type Clerk struct {
 	mu      sync.Mutex
 	lastMaster 	int 	// latest master
 	nServers  	int 	// number of servers
-	cid			int 	// Server's Id
+	cid			int64 	// Clerk's Id
 	lastRequseId int 	// lastest Request ID
 }
 
@@ -29,6 +29,8 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	// You'll have to add code here.
 	ck.lastMaster = 0
 	ck.nServers = len(servers)
+	ck.cid = nrand()
+	ck.lastRequseId = 0
 	return ck
 }
 
@@ -53,11 +55,13 @@ func (ck *Clerk) Get(key string) string {
 	curLeader := ck.lastMaster
 	ck.mu.Unlock()
 
-	for i := 0; i < ck.nServers; i++ {
-		ck.mu.Lock()
-		args := GetArgs{key, ck.cid, ck.lastRequseId + 1}
+	ck.mu.Lock()
+	args := GetArgs{key, ck.cid, ck.lastRequseId + 1}
+	ck.lastRequseId++
+	ck.mu.Unlock()
+
+	for i := 0; ; i++ {
 		reply := GetReply{}
-		ck.mu.Unlock()
 		ok := ck.servers[curLeader].Call("KVServer.Get", &args, &reply)
 		if ok && !reply.WrongLeader {
 			ck.mu.Lock()
@@ -88,11 +92,15 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	curLeader := ck.lastMaster
 	ck.mu.Unlock()
 
-	for i := 0; i < ck.nServers; i++ {
-		ck.mu.Lock()
-		args := PutAppendArgs{key, value, op, ck.cid, ck.lastRequseId + 1}
+	ck.mu.Lock()
+	args := PutAppendArgs{key, value, op, ck.cid, ck.lastRequseId + 1}
+	ck.lastRequseId++
+	ck.mu.Unlock()
+
+	for i := 0; ; i++ {
+		
 		reply := PutAppendReply{}
-		ck.mu.Unlock()
+
 		ok := ck.servers[curLeader].Call("KVServer.PutAppend", &args, &reply)
 		if ok && !reply.WrongLeader {
 			ck.mu.Lock()
