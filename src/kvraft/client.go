@@ -31,6 +31,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.lastMaster = 0
 	ck.nServers = len(servers)
 	ck.cid = nrand()
+	//fmt.Println("Clerk Id is ", ck.cid)
 	ck.lastRequseId = 0
 	return ck
 }
