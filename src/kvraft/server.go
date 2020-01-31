@@ -7,6 +7,7 @@ import (
 	"raft"
 	"sync"
 	"fmt"
+	"time"
 )
 
 const Debug = 0
@@ -289,7 +290,7 @@ func (kv *KVServer) Apply() {
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 	kv.shutdown = true
-	close(kv.applyCh)
+	//close(kv.applyCh)
 	// Your code here, if desired.
 }
 
@@ -336,6 +337,18 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	
 
 	go kv.Apply()
+
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			kv.mu.Lock()
+			if kv.shutdown {
+				return
+			}
+			kv.mu.Unlock()
+			kv.applyCond.Broadcast()
+		}
+	}()
 
 	return kv
 }
