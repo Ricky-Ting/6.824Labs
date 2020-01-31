@@ -213,7 +213,11 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 
 func (kv *KVServer) Apply() {
-	for msg := range kv.applyCh {
+	for {
+		msg, ok := <- kv.applyCh
+		if !ok {
+			return
+		}
 		DPrintln(" Server ", kv.me, " Apply receive ", msg)
 		if !msg.CommandValid {
 			kv.applyCond.L.Lock()
@@ -285,6 +289,7 @@ func (kv *KVServer) Apply() {
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 	kv.shutdown = true
+	close(kv.applyCh)
 	// Your code here, if desired.
 }
 
