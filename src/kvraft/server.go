@@ -52,6 +52,7 @@ type KVServer struct {
 	lastResponse map[int64]string // Record latest response for different clerks
 	waitRequest map[int]int  // map[index] = 0, 1 : whether a goroutine wait for index
 	Request 	map[int]Op 	 // map[index] = Op
+	shutdown 	bool
 
 }
 
@@ -88,6 +89,15 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		kv.mu.Unlock()
 		kv.applyCond.Wait()
 		kv.mu.Lock()
+
+		if kv.shutdown {
+			delete(kv.waitRequest, index)
+			kv.applyCond.Broadcast()
+			reply.WrongLeader = true
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
 
 		curTerm, curIsLeader := kv.rf.GetState()
 		if curTerm != term || !curIsLeader {
@@ -157,6 +167,15 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		kv.mu.Unlock()
 		kv.applyCond.Wait()
 		kv.mu.Lock()
+
+		if kv.shutdown {
+			delete(kv.waitRequest, index)
+			kv.applyCond.Broadcast()
+			reply.WrongLeader = true
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
 
 		//DPrintln("In server PutAppend", kv.Request[index] )
 		curTerm, curIsLeader := kv.rf.GetState()
@@ -265,6 +284,7 @@ func (kv *KVServer) Apply() {
 //
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
+	kv.shutdown = true
 	// Your code here, if desired.
 }
 
@@ -301,6 +321,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	
 
 	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.shutdown = false
 	
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
