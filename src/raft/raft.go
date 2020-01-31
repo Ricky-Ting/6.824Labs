@@ -491,7 +491,7 @@ func (rf *Raft) electionTimeout() {
 
 								// start heartbeating
 								go rf.heartBeating(term)
-								go rf.Start(nil)
+								//go rf.Start(nil)
 							}
 						}
 
@@ -788,6 +788,7 @@ func (rf *Raft) Apply() {
 		rf.mu.Unlock()
 
 		debugln(rf.me, " apply: ", applymsg)
+		//fmt.Println(rf.me, " apply: ", applymsg)
 		rf.applyCh <- applymsg
 		debugln(rf.me, " apply: ", applymsg, "Done")
 		rf.mu.Lock()
