@@ -25,6 +25,8 @@ import "fmt"
 import "bytes"
 import "labgob"
 
+import "raftkv"
+
 
 const (
 	Follower  int = 0
@@ -131,6 +133,35 @@ func (rf *Raft) GetState() (int, bool) {
 
 	return term, isleader
 }
+
+
+
+func (rf *Raft) SaveSnapshot(sp raftkv.Snapshot) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.log = rf.log[sp.LastIncludedIndex - rf.firstLogIndex + 1 : ]
+	rf.firstLogIndex = sp.LastIncludedIndex + 1
+
+	// Encode state
+	w1 := new(bytes.Buffer)
+	e1 := labgob.NewEncoder(w)
+	e1.Encode(rf.currentTerm)
+	e1.Encode(rf.votedFor)
+	e1.Encode(rf.log)
+	state := w1.Bytes()
+
+	// Encode snapshot
+	w2 := new(bytes.Buffer)
+	e2 := labgob.NewEncoder(w)
+	e2.Encode(sp)
+	snapshot := w2.Bytes()
+
+	rf.persister.SaveStateAndSnapshot(state, snapshot)
+}
+
+
+
 
 //
 // save Raft's persistent state to stable storage,
