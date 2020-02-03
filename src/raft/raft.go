@@ -846,6 +846,19 @@ func (rf *Raft) Apply() {
 	}
 } 
 
+
+type InstallSnapshotArgs struct{
+	Term 				int	// leader's term
+	LeaderId 			int 
+	LastIncludedIndex 	int
+	LastIncludedTerm 	int
+	snapshot 			Snapshot
+}
+
+
+
+
+
 // return min(x,y)
 func min(x, y int) int {
 	if x < y {
