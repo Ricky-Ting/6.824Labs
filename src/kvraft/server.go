@@ -228,6 +228,7 @@ func (kv *KVServer) Apply() {
 			return
 		}
 		DPrintln(" Server ", kv.me, " Apply receive ", msg)
+		/*
 		if !msg.CommandValid {
 			kv.applyCond.L.Lock()
 			kv.mu.Lock()
@@ -247,12 +248,13 @@ func (kv *KVServer) Apply() {
 			kv.applyCond.L.Unlock()
 			continue
 		}
+		*/
 
 		kv.applyCond.L.Lock()
 		kv.mu.Lock()
 
 		index := msg.CommandIndex
-		//term := msg.CommandTerm
+		term := msg.CommandTerm
 		op, ok := msg.Command.(Op)
 		if !ok {
 			fmt.Println("In Apply: type error")
@@ -283,16 +285,28 @@ func (kv *KVServer) Apply() {
 		}
 
 		delete(kv.Request, index)
+
+		if kv.maxraftstate != -1 {
+			kv.saveSnapshot(index, term)
+		}
+
 		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
-		
 	}
 }
 
 
 
-func (kv *KVServer) saveSnapshot() {
+func (kv *KVServer) saveSnapshot(index, term int) {
+	kv.rf.mu.Lock()
+	defer kv.rf.mu.Unlock()
 
+	if kv.maxraftstate > kv.rf.persister.RaftStateSize() {
+		return
+	}
+
+	sp := Snapshot{index, term, kv.database, kv.lastRequestID, kv.lastResponse}
+	kv.rf.SaveSnapshot(sp)
 }
 
 //
@@ -363,10 +377,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 			kv.applyCond.Broadcast()
 		}
 	}()
-
-	if maxraftstate != -1 {
-		go kv.saveSnapshot()
-	}
 
 	return kv
 }
