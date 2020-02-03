@@ -38,13 +38,7 @@ type Op struct {
 	Value 		string
 }
 
-type Snapshot struct {
-	LastIncludedIndex  int
-	LastIncludedTerm   int
-	Database 		   map[string]string
-	LastRequestID 	   map[int64]int
-	LastResponse 	   map[int64]string
-}
+
 
 type KVServer struct {
 	mu      sync.Mutex
@@ -298,14 +292,12 @@ func (kv *KVServer) Apply() {
 
 
 func (kv *KVServer) saveSnapshot(index, term int) {
-	kv.rf.mu.Lock()
-	defer kv.rf.mu.Unlock()
 
 	if kv.maxraftstate > kv.rf.persister.RaftStateSize() {
 		return
 	}
 
-	sp := Snapshot{index, term, kv.database, kv.lastRequestID, kv.lastResponse}
+	sp := Raft.Snapshot{index, term, kv.database, kv.lastRequestID, kv.lastResponse}
 	kv.rf.SaveSnapshot(sp)
 }
 

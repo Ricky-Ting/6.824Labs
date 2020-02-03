@@ -25,7 +25,6 @@ import "fmt"
 import "bytes"
 import "labgob"
 
-import "raftkv"
 
 
 const (
@@ -66,6 +65,16 @@ type ApplyMsg struct {
 	Command      interface{}
 	CommandIndex int
 	CommandTerm  int
+}
+
+
+// Snapshot struct
+type Snapshot struct {
+	LastIncludedIndex  int
+	LastIncludedTerm   int
+	Database 		   map[string]string
+	LastRequestID 	   map[int64]int
+	LastResponse 	   map[int64]string
 }
 
 //
@@ -137,7 +146,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 
 
-func (rf *Raft) SaveSnapshot(sp raftkv.Snapshot) {
+func (rf *Raft) SaveSnapshot(sp Snapshot) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -146,7 +155,7 @@ func (rf *Raft) SaveSnapshot(sp raftkv.Snapshot) {
 
 	// Encode state
 	w1 := new(bytes.Buffer)
-	e1 := labgob.NewEncoder(w)
+	e1 := labgob.NewEncoder(w1)
 	e1.Encode(rf.currentTerm)
 	e1.Encode(rf.votedFor)
 	e1.Encode(rf.log)
@@ -154,7 +163,7 @@ func (rf *Raft) SaveSnapshot(sp raftkv.Snapshot) {
 
 	// Encode snapshot
 	w2 := new(bytes.Buffer)
-	e2 := labgob.NewEncoder(w)
+	e2 := labgob.NewEncoder(w2)
 	e2.Encode(sp)
 	snapshot := w2.Bytes()
 
@@ -438,6 +447,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.shutdown = false
 	rf.applying = false
 	rf.firstLogIndex = 0
+	rf.spIncludedTerm = 0
 
 	// initial the random generator for election timeout 
 	// use current time and serverId to get the seed
@@ -642,7 +652,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if len(rf.log) != 0 {
 		rf.lastLogTerm = rf.log[rf.lastLogIndex - rf.firstLogIndex].Term
 	} else {
-		rf.lastLogTerm = spIncludedTerm
+		rf.lastLogTerm = rf.spIncludedTerm
 	}
 	
 
