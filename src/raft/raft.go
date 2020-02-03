@@ -93,12 +93,15 @@ type Raft struct {
 	timeout time.Time 			// Used for cal timeout
 	votes   int 				// votes get for the lastest term
 	randGen *rand.Rand 			// random gen for election timeout
-	commitIndex	 int  			
+	commitIndex	 int  			// 
 	lastApplied  int
-	lastLogIndex int 
-	lastLogTerm  int
+	
 	shutdown bool
 	applying bool
+
+	lastLogIndex int 
+	lastLogTerm  int
+	firstLogIndex int 
 
 	// Volatile state on master
 	nextIndex 	[]int 
