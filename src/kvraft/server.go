@@ -281,6 +281,12 @@ func (kv *KVServer) Apply() {
 	}
 }
 
+
+
+func (kv *KVServer) saveSnapshot() {
+
+}
+
 //
 // the tester calls Kill() when a KVServer instance won't
 // be needed again. you are not required to do anything
@@ -349,6 +355,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 			kv.applyCond.Broadcast()
 		}
 	}()
+
+	if maxraftstate != -1 {
+		go kv.saveSnapshot()
+	}
 
 	return kv
 }
