@@ -25,8 +25,6 @@ import "fmt"
 import "bytes"
 import "labgob"
 
-// import "bytes"
-// import "labgob"
 
 const (
 	Follower  int = 0
@@ -96,12 +94,12 @@ type Raft struct {
 	commitIndex	 int  			// 
 	lastApplied  int
 	
-	shutdown bool
-	applying bool
+	shutdown bool 				// to safely shutdown
+	applying bool 				// to apply in order
 
 	lastLogIndex int 
 	lastLogTerm  int
-	firstLogIndex int 
+	firstLogIndex int 			
 
 	// Volatile state on master
 	nextIndex 	[]int 
@@ -148,6 +146,7 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(rf.currentTerm)
@@ -341,18 +340,16 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index = rf.lastLogIndex + 1
 	term = rf.currentTerm
 
-	// update lastLogIndex
+	// update lastLogIndex and lastLogTerm
 	rf.lastLogIndex++
 	rf.lastLogTerm = rf.currentTerm
 
 	// write to local log entries
-	if index >= len(rf.log) {
-		rf.log = append(rf.log, LogEntry{term, command})
-	} else {
-		rf.log[index] = LogEntry{term, command}
-	}
+	rf.log = append(rf.log, LogEntry{term, command})
 
+	// persist the raft's state
 	rf.persist()
+
 	// Send AppendEntries to all followers
 	for server, _ := range rf.peers {
 		if server == rf.me {
@@ -362,8 +359,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			rf.sendAppendEntries(term,server)
 		}(term, server)
 	}
-
-	
 
 	return index, term, isLeader
 }
@@ -438,6 +433,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
+
+// Timely random electionTimeout
 func (rf *Raft) electionTimeout() {
 	for {
 		rf.mu.Lock()
@@ -446,7 +443,9 @@ func (rf *Raft) electionTimeout() {
 
 		time.Sleep(dura) // Sleep for dura time, Sleep without holding the lock
 
+
 		rf.mu.Lock()
+
 		if rf.shutdown {
 			rf.mu.Unlock()
 			return
@@ -482,13 +481,11 @@ func (rf *Raft) electionTimeout() {
 								rf.state = Leader
 								rf.thisTermFirst = rf.lastLogIndex + 1
 								// initialize nextIndex and matchIndex
-								//rf.Appendch = make([]chan bool, len(rf.peers))
 								rf.nextIndex = []int{}
 								rf.matchIndex = []int{}
 								for i := 0; i < len(rf.peers); i++ {
 									rf.nextIndex = append(rf.nextIndex, rf.lastLogIndex+1)
 									rf.matchIndex = append(rf.matchIndex, 0)
-									//rf.Appendch[i] = make(chan bool)
 								}
 								rf.persist()
 
@@ -615,11 +612,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 
 func (rf *Raft) sendAppendEntries(term int, server int) {
-	//for {
-	//	_, chanOK := <- rf.Appendch[server]
-	//	if !chanOK {
-	//		return
-	//	}
 		ok := false
 		for !ok {
 			rf.mu.Lock()
@@ -681,7 +673,6 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 			rf.mu.Unlock()
 
 		}
-	//}
 }
 
 
@@ -695,11 +686,6 @@ func (rf *Raft) heartBeating(term int) {
 		go func(term, server int) {
 			rf.sendAppendEntries(term,server)
 		}(term, server)
-		/*
-		go func(server int) {
-			rf.Appendch[server] <- true
-		}(server)
-		*/
 	}
 	go func(term int) {
 		rf.checkCommit(term)
@@ -719,11 +705,6 @@ func (rf *Raft) heartBeating(term int) {
 			if server == rf.me {
 				continue
 			}
-			/*
-			go func(server int) {
-				rf.Appendch[server] <- true
-			}(server)
-			*/
 			go func(term, server int) {
 				rf.sendAppendEntries(term,server)
 			}(term, server)
@@ -791,7 +772,6 @@ func (rf *Raft) Apply() {
 		rf.mu.Unlock()
 
 		debugln(rf.me, " apply: ", applymsg)
-		//fmt.Println(rf.me, " apply: ", applymsg)
 		rf.applyCh <- applymsg
 		debugln(rf.me, " apply: ", applymsg, "Done")
 		rf.mu.Lock()
@@ -802,7 +782,7 @@ func (rf *Raft) Apply() {
 	}
 } 
 
-
+// return min(x,y)
 func min(x, y int) int {
 	if x < y {
 		return x
@@ -810,6 +790,7 @@ func min(x, y int) int {
 	return y
 }
 
+// return max(x,y)
 func max(x, y int) int {
 	if x > y {
 		return x
