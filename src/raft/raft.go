@@ -101,7 +101,8 @@ type Raft struct {
 
 	lastLogIndex int 
 	lastLogTerm  int
-	firstLogIndex int 			
+	firstLogIndex int 		
+	spIncludedTerm int	
 
 	// Volatile state on master
 	nextIndex 	[]int 
@@ -436,6 +437,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.votedFor = -1
 	rf.shutdown = false
 	rf.applying = false
+	rf.firstLogIndex = 0
 
 	// initial the random generator for election timeout 
 	// use current time and serverId to get the seed
@@ -585,19 +587,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// 2. Reply false if log doesn’t contain an entry at prevLogIndex 
 	// whose term matches prevLogTerm
-	if args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	if args.PrevLogIndex - rf.firstLogIndex >= len(rf.log) || (args.PrevLogIndex - rf.firstLogIndex >=0 && rf.log[args.PrevLogIndex - rf.firstLogIndex].Term != args.PrevLogTerm) {
 		reply.Success = false
-		if args.PrevLogIndex < len(rf.log) {
-			reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
-			for i := args.PrevLogIndex; i >= 0; i-- {
+		if args.PrevLogIndex - rf.firstLogIndex < len(rf.log) {
+			reply.ConflictTerm = rf.log[args.PrevLogIndex - rf.firstLogIndex].Term
+			for i := args.PrevLogIndex - rf.firstLogIndex; i >= 0; i-- {
 				if rf.log[i].Term == reply.ConflictTerm {
-					reply.ConflictIndex = i
+					reply.ConflictIndex = i + rf.firstLogIndex
 				} else {
 					break
 				}
 			}
 		} else {
-			reply.ConflictIndex = len(rf.log)
+			reply.ConflictIndex = len(rf.log) + rf.firstLogIndex
 		}
 		return
 	}
@@ -606,13 +608,22 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// but different terms), delete the existing entry and all that
 	// follow it
 	i := 0
+	flag := true
 	for ; i < len(args.Entries); i++ {
-		newIndex := args.PrevLogIndex + 1 + i
+		newIndex := args.PrevLogIndex + 1 + i - rf.firstLogIndex
+		if newIndex < 0 {
+			continue
+		}
 		if newIndex >= len(rf.log) || rf.log[newIndex].Term != args.Entries[i].Term {
+			flag = false
 			break
 		}
 	}
-	rf.log = rf.log[:args.PrevLogIndex + 1 + i]
+
+	if !flag {
+		rf.log = rf.log[:args.PrevLogIndex + 1 + i - rf.firstLogIndex]
+	} 
+	
 
 	// 4. Append any new entries not already in the log
 	for ; i < len(args.Entries); i++ {
@@ -623,12 +634,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// 5. If leaderCommit > commitIndex, 
 	// set commitIndex = min(leaderCommit, index of last new entry)
 	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1 )
+		rf.commitIndex = min(args.LeaderCommit, rf.firstLogIndex+len(rf.log)-1 )
 		go rf.Apply()
 	}
 
-	rf.lastLogIndex = len(rf.log) - 1
-	rf.lastLogTerm = rf.log[rf.lastLogIndex].Term
+	rf.lastLogIndex = rf.firstLogIndex + len(rf.log) - 1
+	if len(rf.log) != 0 {
+		rf.lastLogTerm = rf.log[rf.lastLogIndex - rf.firstLogIndex].Term
+	} else {
+		rf.lastLogTerm = spIncludedTerm
+	}
+	
 
 
 	debug("%d receive \n", rf.me)
@@ -654,11 +670,18 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 				Term: 			rf.currentTerm,
 				LeaderId: 		rf.me,
 				PrevLogIndex: 	rf.nextIndex[server] - 1,
-				PrevLogTerm: 	rf.log[rf.nextIndex[server]-1].Term,
+				//PrevLogTerm: 	rf.log[rf.nextIndex[server]-1].Term,
 				//Entries: 		rf.log[rf.nextIndex[server]:],
 				LeaderCommit: 	rf.commitIndex }
-			args.Entries = make([]LogEntry, len(rf.log[rf.nextIndex[server]:]), len(rf.log[rf.nextIndex[server]:]))
-			copy(args.Entries, rf.log[rf.nextIndex[server]:])
+			if rf.nextIndex[server]-1-rf.firstLogIndex >=0 {
+				args.PrevLogTerm = rf.log[rf.nextIndex[server]-1-rf.firstLogIndex].Term
+			} else if rf.nextIndex[server]-1-rf.firstLogIndex == -1 {
+				args.PrevLogTerm = rf.spIncludedTerm
+			} else {
+				// go snapshot
+			}
+			args.Entries = make([]LogEntry, len(rf.log[rf.nextIndex[server]-rf.firstLogIndex:]), len(rf.log[rf.nextIndex[server]-rf.firstLogIndex:]))
+			copy(args.Entries, rf.log[rf.nextIndex[server]-rf.firstLogIndex:])
 			reply := AppendEntriesReply{}
 			rf.mu.Unlock()
 
@@ -795,10 +818,10 @@ func (rf *Raft) Apply() {
 		rf.lastApplied++
 		rf.applying = true
 		applymsg := ApplyMsg{}
-		if rf.log[apply].Command == nil {
-			applymsg = ApplyMsg{false, rf.log[apply].Command, apply, rf.log[apply].Term}
+		if rf.log[apply-rf.firstLogIndex].Command == nil {
+			applymsg = ApplyMsg{false, rf.log[apply-rf.firstLogIndex].Command, apply, rf.log[apply-rf.firstLogIndex].Term}
 		} else {
-			applymsg = ApplyMsg{true, rf.log[apply].Command, apply, rf.log[apply].Term}
+			applymsg = ApplyMsg{true, rf.log[apply-rf.firstLogIndex].Command, apply, rf.log[apply-rf.firstLogIndex].Term}
 		}
 		rf.mu.Unlock()
 
