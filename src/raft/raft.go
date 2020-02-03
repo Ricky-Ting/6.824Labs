@@ -852,11 +852,13 @@ type InstallSnapshotArgs struct{
 	LeaderId 			int 
 	LastIncludedIndex 	int
 	LastIncludedTerm 	int
-	snapshot 			Snapshot
+	Sp 					Snapshot
 }
 
 
-
+type InstallSnapshotReply struct{
+	Term 	int
+}
 
 
 // return min(x,y)
