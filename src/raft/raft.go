@@ -714,7 +714,9 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 			} else if rf.nextIndex[server]-1-rf.firstLogIndex == -1 {
 				args.PrevLogTerm = rf.spIncludedTerm
 			} else {
-				rf.sendInstallSnapshot(server, term)
+				go rf.sendInstallSnapshot(server, term)
+				rf.mu.Unlock()
+				return
 			}
 			args.Entries = make([]LogEntry, len(rf.log[rf.nextIndex[server]-rf.firstLogIndex:]), len(rf.log[rf.nextIndex[server]-rf.firstLogIndex:]))
 			copy(args.Entries, rf.log[rf.nextIndex[server]-rf.firstLogIndex:])
@@ -916,7 +918,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		var sp Snapshot
 		if d.Decode(&sp) != nil {
 		} else {
-			fmt.Println("Decode Error")
+			fmt.Println("InstallSnapshot Decode Error")
 		}
 
 		if sp.LastIncludedIndex >= args.LastIncludedIndex {
@@ -936,6 +938,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	// New snapshot
 	rf.log = []LogEntry{}
 	rf.firstLogIndex = args.LastIncludedIndex + 1
+	rf.spIncludedTerm = args.LastIncludedTerm
 
 	// Encode state
 	w1 := new(bytes.Buffer)
@@ -978,7 +981,7 @@ func (rf *Raft) sendInstallSnapshot(server int, term int) {
 			var sp Snapshot
 			if d.Decode(&sp) != nil {
 			} else {
-				fmt.Println("Decode Error")
+				fmt.Println("sendInstallSnapshot Decode Error")
 			}
 			args := InstallSnapshotArgs{
 				Term: 				rf.currentTerm,
