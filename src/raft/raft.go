@@ -236,8 +236,13 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.log = log
-		rf.lastLogIndex = len(log) - 1 
-		rf.lastLogTerm = log[rf.lastLogIndex].Term
+		if len(rf.log) != 0 {
+			rf.lastLogIndex = len(log) - 1 
+			rf.lastLogTerm = log[rf.lastLogIndex].Term
+		} else {
+			rf.lastLogIndex = 0
+			rf.lastLogTerm = 0
+		}	
 	}
 	debug("read %d persistence, currentTerm: %d, voteFor: %d \n", rf.me, rf.currentTerm, rf.votedFor)
 	debugln(rf.log)
@@ -258,6 +263,12 @@ func (rf *Raft) readSnapshot(data []byte) {
 		rf.spIncludedTerm = sp.LastIncludedTerm
 		rf.lastApplied = sp.LastIncludedIndex
 		rf.commitIndex = sp.LastIncludedIndex
+
+		rf.lastLogIndex = sp.LastIncludedIndex + rf.lastLogIndex
+		if len(rf.log) == 0 {
+			rf.lastLogTerm = sp.LastIncludedTerm
+		}
+		
 	}
 	applymsg := ApplyMsg{false, sp, -1, -1}
 
@@ -446,6 +457,7 @@ func (rf *Raft) Kill() {
 	defer rf.mu.Unlock()
 
 	rf.shutdown = true
+	rf.persist()
 }
 
 //
