@@ -887,13 +887,13 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	if rf.persister.SnapshotSize() > 0 {
 		r := bytes.NewBuffer(rf.persister.ReadSnapshot())
 		d := labgob.NewDecoder(r)
-		var lastIncludedIndex int
-		if d.Decode(&lastIncludedIndex) != nil {
+		var sp Snapshot
+		if d.Decode(&sp) != nil {
 		} else {
 			fmt.Println("Decode Error")
 		}
 
-		if lastIncludedIndex >= args.LastIncludedIndex {
+		if sp.LastIncludedIndex >= args.LastIncludedIndex {
 			return
 		}
 	}
