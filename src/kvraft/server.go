@@ -235,7 +235,7 @@ func (kv *KVServer) Apply() {
 
 			kv.database = sp.Database
 			kv.lastRequestID = sp.LastRequestID
-			kv.lastResponse = sp.lastResponse
+			kv.lastResponse = sp.LastResponse
 
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
@@ -296,7 +296,7 @@ func (kv *KVServer) saveSnapshot(index, term int) {
 		return
 	}
 
-	sp := Raft.Snapshot{index, term, kv.database, kv.lastRequestID, kv.lastResponse}
+	sp := raft.Snapshot{index, term, kv.database, kv.lastRequestID, kv.lastResponse}
 	kv.rf.SaveSnapshot(sp)
 }
 
