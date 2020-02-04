@@ -916,8 +916,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		d := labgob.NewDecoder(r)
 		var sp Snapshot
 		if d.Decode(&sp) != nil {
-		} else {
 			fmt.Println("InstallSnapshot Decode Error")
+		} else {
 		}
 
 		if sp.LastIncludedIndex >= args.LastIncludedIndex {
@@ -979,8 +979,9 @@ func (rf *Raft) sendInstallSnapshot(server int, term int) {
 			d := labgob.NewDecoder(r)
 			var sp Snapshot
 			if d.Decode(&sp) != nil {
-			} else {
 				fmt.Println("sendInstallSnapshot Decode Error")
+			} else {
+
 			}
 			args := InstallSnapshotArgs{
 				Term: 				rf.currentTerm,
