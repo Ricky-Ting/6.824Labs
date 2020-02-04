@@ -688,7 +688,7 @@ func (rf *Raft) sendAppendEntries(term int, server int) {
 			} else if rf.nextIndex[server]-1-rf.firstLogIndex == -1 {
 				args.PrevLogTerm = rf.spIncludedTerm
 			} else {
-				// go snapshot
+				rf.sendInstallSnapshot(server, term)
 			}
 			args.Entries = make([]LogEntry, len(rf.log[rf.nextIndex[server]-rf.firstLogIndex:]), len(rf.log[rf.nextIndex[server]-rf.firstLogIndex:]))
 			copy(args.Entries, rf.log[rf.nextIndex[server]-rf.firstLogIndex:])
@@ -908,7 +908,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 
 	// New snapshot
-	rf.log = []int{}
+	rf.log = []LogEntry{}
 	rf.firstLogIndex = args.LastIncludedIndex + 1
 
 	// Encode state
@@ -930,7 +930,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.lastApplied = args.LastIncludedIndex
 
-	applymsg = ApplyMsg{false, args.Sp, -1, -1}
+	applymsg := ApplyMsg{false, args.Sp, -1, -1}
 
 	go func(applymsg ApplyMsg) {
 		rf.applyCh <- applymsg
@@ -939,7 +939,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 
-func (rf *Raft) sendInstallSnapshot(server int) {
+func (rf *Raft) sendInstallSnapshot(server int, term int) {
 	ok := false
 		for !ok {
 			rf.mu.Lock()
@@ -957,9 +957,9 @@ func (rf *Raft) sendInstallSnapshot(server int) {
 			args := InstallSnapshotArgs{
 				Term: 				rf.currentTerm,
 				LeaderId: 			rf.me,
-				LastIncludedIndex: 	sp.LastIncludedIndex
-				LastIncludedTerm: 	sp.LastIncludedTerm
-				Sp: 				sp}
+				LastIncludedIndex: 	sp.LastIncludedIndex,
+				LastIncludedTerm: 	sp.LastIncludedTerm,
+				Sp: 				sp }
 			reply := InstallSnapshotReply{}
 			rf.mu.Unlock()
 
