@@ -222,27 +222,25 @@ func (kv *KVServer) Apply() {
 			return
 		}
 		DPrintln(" Server ", kv.me, " Apply receive ", msg)
-		/*
+		
 		if !msg.CommandValid {
 			kv.applyCond.L.Lock()
 			kv.mu.Lock()
 
-			index := msg.CommandIndex
-			kv.Request[index] = Op{}
-
-			kv.applyCond.Broadcast()
-			for kv.waitRequest[index] == 1 {
-				kv.mu.Unlock()
-				kv.applyCond.Wait()
-				kv.mu.Lock()
+			sp, ok := msg.Command.(raft.Snapshot)
+			if !ok {
+				fmt.Println("In Apply: type error")
 			}
 
-			delete(kv.Request, index)
+			kv.database = sp.Database
+			kv.lastRequestID = sp.LastRequestID
+			kv.lastResponse = sp.lastResponse
+
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			continue
 		}
-		*/
+		
 
 		kv.applyCond.L.Lock()
 		kv.mu.Lock()
