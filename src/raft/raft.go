@@ -157,6 +157,9 @@ func (rf *Raft) SaveSnapshot(sp Snapshot) {
 	rf.firstLogIndex = sp.LastIncludedIndex + 1
 	debugln("raft ", rf.me, " now have firstLogIndex : ", rf.firstLogIndex)
 	rf.spIncludedTerm = sp.LastIncludedTerm
+	debugln("raft ", rf.me, " now have spIncludedTerm : ", rf.spIncludedTerm)
+
+	debugln("raft ", rf.me, " save sp ", sp)
 
 	// Encode state
 	w1 := new(bytes.Buffer)
@@ -821,7 +824,7 @@ func (rf *Raft) checkCommit(term int) {
 
 		cnt := 0
 		for server, _ := range rf.peers {
-			if server == rf.me && len(rf.log) > cur {
+			if server == rf.me && rf.firstLogIndex + len(rf.log) > cur {
 				cnt++
 				continue
 			}
