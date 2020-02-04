@@ -959,8 +959,8 @@ func (rf *Raft) sendInstallSnapshot(server int) {
 				LeaderId: 			rf.me,
 				LastIncludedIndex: 	sp.LastIncludedIndex
 				LastIncludedTerm: 	sp.LastIncludedTerm
-				Sp: 				sp
-			reply := AppendEntriesReply{}
+				Sp: 				sp}
+			reply := InstallSnapshotReply{}
 			rf.mu.Unlock()
 
 			debugln(rf.me, " send InstallSnapshot to ", server, " with ", args)
