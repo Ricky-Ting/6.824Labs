@@ -936,7 +936,59 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.applyCh <- applymsg
 	}(applymsg)
 
+}
 
+
+func (rf *Raft) sendInstallSnapshot(server int) {
+	ok := false
+		for !ok {
+			rf.mu.Lock()
+			if rf.state != Leader || rf.currentTerm != term || rf.shutdown {
+				rf.mu.Unlock()
+				return 
+			}
+			r := bytes.NewBuffer(rf.persister.ReadSnapshot())
+			d := labgob.NewDecoder(r)
+			var sp Snapshot
+			if d.Decode(&sp) != nil {
+			} else {
+				fmt.Println("Decode Error")
+			}
+			args := InstallSnapshotArgs{
+				Term: 				rf.currentTerm,
+				LeaderId: 			rf.me,
+				LastIncludedIndex: 	sp.LastIncludedIndex
+				LastIncludedTerm: 	sp.LastIncludedTerm
+				Sp: 				sp
+			reply := AppendEntriesReply{}
+			rf.mu.Unlock()
+
+			debugln(rf.me, " send InstallSnapshot to ", server, " with ", args)
+			ok = rf.peers[server].Call("Raft.InstallSnapshot", &args, &reply)
+
+			rf.mu.Lock()
+			if rf.state != Leader || rf.currentTerm != term {
+				rf.mu.Unlock()
+				return 
+			}
+			if !ok {
+				rf.mu.Unlock()
+				continue
+			}
+			if reply.Term > rf.currentTerm {
+					rf.state = Follower
+					rf.currentTerm = reply.Term
+					rf.persist()
+					rf.mu.Unlock()
+					return
+			}
+
+			rf.nextIndex[server] = max(rf.nextIndex[server], args.LastIncludedIndex + 1)
+			rf.matchIndex[server] = max(rf.matchIndex[server], args.LastIncludedIndex)
+
+			rf.mu.Unlock()
+
+		}
 }
 
 
