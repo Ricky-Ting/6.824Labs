@@ -237,22 +237,9 @@ func (rf *Raft) readPersist(data []byte) {
 }
 
 func (rf *Raft) readSnapshot(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if data == nil || len(data) < 1 { // bootstrap without any snapshot?
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var sp Snapshot
@@ -263,7 +250,7 @@ func (rf *Raft) readSnapshot(data []byte) {
 		rf.spIncludedTerm = sp.LastIncludedTerm
 		rf.lastApplied = sp.LastIncludedIndex
 	}
-	applymsg := ApplyMsg{false, args.Sp, -1, -1}
+	applymsg := ApplyMsg{false, sp, -1, -1}
 
 	go func(applymsg ApplyMsg) {
 		rf.applyCh <- applymsg
