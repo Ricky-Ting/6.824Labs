@@ -296,8 +296,11 @@ func (kv *KVServer) saveSnapshot(index, term int) {
 		return
 	}
 
+	DPrintf("server %d, maxraftstate is %d, raftstatesize is %d \n", kv.me, kv.maxraftstate, kv.persister.RaftStateSize())
 	sp := raft.Snapshot{index, term, kv.database, kv.lastRequestID, kv.lastResponse}
+	DPrintf("server %d call raft.Snapshot \n", kv.me)
 	kv.rf.SaveSnapshot(sp)
+	DPrintf("server %d call raft.Snapshot return \n", kv.me)
 }
 
 //
@@ -334,7 +337,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv := new(KVServer)
 	kv.me = me
-	kv.maxraftstate = maxraftstate
+	//kv.maxraftstate = maxraftstate
+	kv.maxraftstate = 1
 	kv.persister = persister
 
 	// You may need initialization code here.
