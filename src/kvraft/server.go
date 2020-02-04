@@ -49,6 +49,7 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	persister *raft.Persister
 	database 	map[string]string
 	applyCond 	*sync.Cond
 	lastRequestID map[int64]int // Record latest request for different clerks
@@ -291,7 +292,7 @@ func (kv *KVServer) Apply() {
 
 func (kv *KVServer) saveSnapshot(index, term int) {
 
-	if kv.maxraftstate > kv.rf.persister.RaftStateSize() {
+	if kv.maxraftstate > kv.persister.RaftStateSize() {
 		return
 	}
 
@@ -334,6 +335,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
+	kv.persister = persister
 
 	// You may need initialization code here.
 	kv.database = make(map[string]string)
