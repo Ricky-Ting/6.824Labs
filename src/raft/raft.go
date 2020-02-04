@@ -236,6 +236,40 @@ func (rf *Raft) readPersist(data []byte) {
 
 }
 
+func (rf *Raft) readSnapshot(data []byte) {
+	if data == nil || len(data) < 1 { // bootstrap without any state?
+		return
+	}
+	// Your code here (2C).
+	// Example:
+	// r := bytes.NewBuffer(data)
+	// d := labgob.NewDecoder(r)
+	// var xxx
+	// var yyy
+	// if d.Decode(&xxx) != nil ||
+	//    d.Decode(&yyy) != nil {
+	//   error...
+	// } else {
+	//   rf.xxx = xxx
+	//   rf.yyy = yyy
+	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var sp Snapshot
+	if d.Decode(&sp) != nil {
+		fmt.Println("readSnapshot: decode error")
+	} else {
+		rf.firstLogIndex = sp.LastIncludedIndex + 1
+		rf.spIncludedTerm = sp.LastIncludedTerm
+		rf.lastApplied = sp.LastIncludedIndex
+	}
+	applymsg := ApplyMsg{false, args.Sp, -1, -1}
+
+	go func(applymsg ApplyMsg) {
+		rf.applyCh <- applymsg
+	}(applymsg)
+}
+
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -468,7 +502,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	// if it has persisted state saved, it will cover the initialization above
 	rf.readPersist(persister.ReadRaftState())
-
+	rf.readSnapshot(persister.ReadSnapshot())
 
 	// Election Timeout :  500ms - 800ms
 	go rf.electionTimeout()
