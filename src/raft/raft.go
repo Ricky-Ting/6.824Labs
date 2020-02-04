@@ -861,6 +861,85 @@ type InstallSnapshotReply struct{
 }
 
 
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	// If RPC request or response contains term T > currentTerm: 
+	// set currentTerm = T, convert to follower
+	if args.Term > rf.currentTerm {
+		rf.currentTerm = args.Term
+		rf.state = Follower
+		rf.persist()
+	}
+
+	reply.Term = rf.currentTerm
+
+	// Reply immediately if term < currentTerm
+	if args.Term < rf.currentTerm {
+		return
+	}
+
+	// Reset election Timeout
+	rf.timeout = time.Now().Add(time.Millisecond * time.Duration(500+20*(rf.randGen.Int()%16)))
+
+	// Exist snapshot and old snapshot
+	if rf.persister.SnapshotSize() > 0 {
+		r := bytes.NewBuffer(rf.persister.ReadSnapshot())
+		d := labgob.NewDecoder(r)
+		var lastIncludedIndex int
+		if d.Decode(&lastIncludedIndex) != nil {
+		} else {
+			fmt.Println("Decode Error")
+		}
+
+		if lastIncludedIndex >= args.LastIncludedIndex {
+			return
+		}
+	}
+
+	// If existing log entry has same index and term as snapshot’s 
+	// last included entry, retain log entries following it and reply
+
+	index := args.LastIncludedIndex - rf.firstLogIndex
+	if index >= 0 && index < len(rf.log) {
+		return
+	}
+
+
+	// New snapshot
+	rf.log = []int{}
+	rf.firstLogIndex = args.LastIncludedIndex + 1
+
+	// Encode state
+	w1 := new(bytes.Buffer)
+	e1 := labgob.NewEncoder(w1)
+	e1.Encode(rf.currentTerm)
+	e1.Encode(rf.votedFor)
+	e1.Encode(rf.log)
+	state := w1.Bytes()
+
+	// Encode snapshot
+	w2 := new(bytes.Buffer)
+	e2 := labgob.NewEncoder(w2)
+	e2.Encode(args.Sp)
+	snapshot := w2.Bytes()
+
+	// Save snapshot and state
+	rf.persister.SaveStateAndSnapshot(state, snapshot)
+
+	rf.lastApplied = args.LastIncludedIndex
+
+	applymsg = ApplyMsg{false, args.Sp, -1, -1}
+
+	go func(applymsg ApplyMsg) {
+		rf.applyCh <- applymsg
+	}(applymsg)
+
+
+}
+
+
 // return min(x,y)
 func min(x, y int) int {
 	if x < y {
