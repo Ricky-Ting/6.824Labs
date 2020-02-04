@@ -34,7 +34,7 @@ const (
 )
 
 
-var DebugEnabled bool = true
+var DebugEnabled bool = false
 
 func debug(format string, a ...interface{}) (n int, err error) {
 	if DebugEnabled {
@@ -257,6 +257,7 @@ func (rf *Raft) readSnapshot(data []byte) {
 		rf.firstLogIndex = sp.LastIncludedIndex + 1
 		rf.spIncludedTerm = sp.LastIncludedTerm
 		rf.lastApplied = sp.LastIncludedIndex
+		rf.commitIndex = sp.LastIncludedIndex
 	}
 	applymsg := ApplyMsg{false, sp, -1, -1}
 
@@ -960,6 +961,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.persister.SaveStateAndSnapshot(state, snapshot)
 
 	rf.lastApplied = args.LastIncludedIndex
+	rf.commitIndex = args.LastIncludedIndex
 
 	applymsg := ApplyMsg{false, args.Sp, -1, -1}
 
