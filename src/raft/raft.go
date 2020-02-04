@@ -150,8 +150,13 @@ func (rf *Raft) SaveSnapshot(sp Snapshot) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	debug("raft %d receive sp \n", rf.me)
+
 	rf.log = rf.log[sp.LastIncludedIndex - rf.firstLogIndex + 1 : ]
+	debugln("raft ", rf.me, " now have log : ", rf.log)
 	rf.firstLogIndex = sp.LastIncludedIndex + 1
+	debugln("raft ", rf.me, " now have firstLogIndex : ", rf.firstLogIndex)
+	rf.spIncludedTerm = sp.LastIncludedTerm
 
 	// Encode state
 	w1 := new(bytes.Buffer)
