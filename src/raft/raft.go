@@ -34,7 +34,7 @@ const (
 )
 
 
-var DebugEnabled bool = false
+var DebugEnabled bool = true
 
 func debug(format string, a ...interface{}) (n int, err error) {
 	if DebugEnabled {
@@ -683,8 +683,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 
 
-	debug("%d receive \n", rf.me)
-	debugln(args.Entries)
+	debugln(rf.me, " receive ", args.Entries)
 	debug("%d commitIndex %d\n", rf.me, rf.commitIndex)
 
 	rf.persist()
