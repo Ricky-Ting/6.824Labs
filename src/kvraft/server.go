@@ -312,6 +312,7 @@ func (kv *KVServer) saveSnapshot(index, term int) {
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 	kv.shutdown = true
+	DPrintf("server %d shutdown \n", kv.me)
 	//close(kv.applyCh)
 	// Your code here, if desired.
 }
@@ -337,8 +338,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv := new(KVServer)
 	kv.me = me
-	//kv.maxraftstate = maxraftstate
-	kv.maxraftstate = 1
+	kv.maxraftstate = maxraftstate
+	//kv.maxraftstate = 1
 	kv.persister = persister
 
 	// You may need initialization code here.

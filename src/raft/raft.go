@@ -239,7 +239,7 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.lastLogIndex = len(log) - 1 
 		if len(rf.log) != 0 {
 			rf.lastLogTerm = log[rf.lastLogIndex].Term
-		} else 
+		} 
 	}
 	debug("read %d persistence, currentTerm: %d, voteFor: %d \n", rf.me, rf.currentTerm, rf.votedFor)
 	debugln(rf.log)
