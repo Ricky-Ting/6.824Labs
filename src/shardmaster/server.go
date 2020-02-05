@@ -86,6 +86,11 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sm.rf = raft.Make(servers, me, persister, sm.applyCh)
 
 	// Your code here.
+	sm.applyCond = sync.NewCond(new(sync.Mutex))
+	sm.lastRequestID = make(map[int64]int)
+	sm.lastResponse = make(map[int64]string)
+	sm.waitRequest = make(map[int]int)
+	sm.Request = make(map[int]Op)
 
 	return sm
 }
