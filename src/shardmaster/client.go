@@ -12,6 +12,7 @@ import "math/big"
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// Your data here.
+	mu      sync.Mutex
 	lastMaster 	int 	// latest master
 	nServers  	int 	// number of servers
 	cid			int64 	// Clerk's Id
