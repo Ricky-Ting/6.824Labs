@@ -14,6 +14,12 @@ type ShardMaster struct {
 	applyCh chan raft.ApplyMsg
 
 	// Your data here.
+	applyCond 	*sync.Cond
+	lastRequestID map[int64]int // Record latest request for different clerks
+	lastResponse map[int64]string // Record latest response for different clerks
+	waitRequest map[int]int  // map[index] = 0, 1 : whether a goroutine wait for index
+	Request 	map[int]Op 	 // map[index] = Op
+	shutdown 	bool
 
 	configs []Config // indexed by config num
 }
