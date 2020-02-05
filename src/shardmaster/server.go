@@ -61,6 +61,9 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 func (sm *ShardMaster) Kill() {
 	sm.rf.Kill()
 	// Your code here, if desired.
+	sm.mu.Lock()
+	sm.shutdown = true
+	sm.mu.Unlock()
 }
 
 // needed by shardkv tester
