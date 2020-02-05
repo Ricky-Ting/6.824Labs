@@ -109,8 +109,13 @@ func (ck *Clerk) Leave(gids []int) {
 func (ck *Clerk) Move(shard int, gid int) {
 	args := &MoveArgs{}
 	// Your code here.
+	ck.mu.Lock()
+	args.Cid = ck.cid
+	args.RequestId = ck.lastRequseId + 1
+	ck.lastRequseId++
 	args.Shard = shard
 	args.GID = gid
+	ck.mu.Unlock()
 
 	for {
 		// try each known server.
