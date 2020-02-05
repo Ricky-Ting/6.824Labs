@@ -38,7 +38,7 @@ type Op struct {
 	Value 		string
 }
 
-type kvServerState {
+type kvServerState struct {
 	Database 		   map[string]string
 	LastRequestID 	   map[int64]int
 	LastResponse 	   map[int64]string
@@ -236,10 +236,14 @@ func (kv *KVServer) Apply() {
 			if !ok {
 				fmt.Println("In Apply: type error")
 			}
+			state, ok2 := sp.ApplicationState.(kvServerState)
+			if !ok2 {
+				fmt.Println("In Apply: type error")
+			}
 
-			kv.database = sp.Database
-			kv.lastRequestID = sp.LastRequestID
-			kv.lastResponse = sp.LastResponse
+			kv.database = state.Database
+			kv.lastRequestID = state.LastRequestID
+			kv.lastResponse = state.LastResponse
 
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
@@ -301,7 +305,7 @@ func (kv *KVServer) saveSnapshot(index, term int) {
 	}
 
 	DPrintf("server %d, maxraftstate is %d, raftstatesize is %d \n", kv.me, kv.maxraftstate, kv.persister.RaftStateSize())
-	sp := raft.Snapshot{index, term, kv.database, kv.lastRequestID, kv.lastResponse}
+	sp := raft.Snapshot{index, term, kvServerState{kv.database, kv.lastRequestID, kv.lastResponse}}
 	DPrintf("server %d call raft.Snapshot \n", kv.me)
 	kv.rf.SaveSnapshot(sp)
 	DPrintf("server %d call raft.Snapshot return \n", kv.me)
