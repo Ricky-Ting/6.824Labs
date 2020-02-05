@@ -62,7 +62,12 @@ func (ck *Clerk) Query(num int) Config {
 func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{}
 	// Your code here.
+	ck.mu.Lock()
+	args.Cid = ck.cid
+	args.RequestId = ck.lastRequseId + 1
+	ck.lastRequseId++
 	args.Servers = servers
+	ck.mu.Unlock()
 
 	for {
 		// try each known server.
