@@ -72,9 +72,12 @@ type ApplyMsg struct {
 type Snapshot struct {
 	LastIncludedIndex  int
 	LastIncludedTerm   int
+	/*
 	Database 		   map[string]string
 	LastRequestID 	   map[int64]int
 	LastResponse 	   map[int64]string
+	*/
+	ApplicationState 	interface{}
 }
 
 //
