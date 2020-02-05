@@ -39,7 +39,13 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{}
 	// Your code here.
+	ck.mu.Lock()
+	args.Cid = ck.cid
+	args.RequestId = ck.lastRequseId + 1
+	ck.lastRequseId++
 	args.Num = num
+	ck.mu.Unlock()
+	
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
