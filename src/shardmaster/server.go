@@ -91,6 +91,21 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sm.lastResponse = make(map[int64]string)
 	sm.waitRequest = make(map[int]int)
 	sm.Request = make(map[int]Op)
+	sm.shutdown = false
+
+	go sm.Apply()
+
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			sm.mu.Lock()
+			if sm.shutdown {
+				return
+			}
+			sm.mu.Unlock()
+			sm.applyCond.Broadcast()
+		}
+	}()
 
 	return sm
 }
