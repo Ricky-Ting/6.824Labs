@@ -343,6 +343,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
+	labgob.Register(KVServerState{})
 
 	kv := new(KVServer)
 	kv.me = me
@@ -364,7 +365,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	labgob.Register(KVServerState{})
 
 	// You may need initialization code here.
 	
