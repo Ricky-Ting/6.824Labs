@@ -27,6 +27,11 @@ type ShardMaster struct {
 
 type Op struct {
 	// Your data here.
+	Optype 		string 				// Join, Leave, Move, or Query
+	Servers 	map[int][]string 	// args for Join
+	GIDs 		[]int 				// args for Leave or Move
+	Shard 		int 				// args for Move
+	Num 		int 				// args for Query
 }
 
 
