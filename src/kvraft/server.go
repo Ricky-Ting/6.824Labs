@@ -38,7 +38,11 @@ type Op struct {
 	Value 		string
 }
 
-
+type kvServerState {
+	Database 		   map[string]string
+	LastRequestID 	   map[int64]int
+	LastResponse 	   map[int64]string
+}
 
 type KVServer struct {
 	mu      sync.Mutex
