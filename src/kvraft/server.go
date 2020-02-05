@@ -2,6 +2,7 @@ package raftkv
 
 import (
 	"labgob"
+	"encoding/gob"
 	"labrpc"
 	"log"
 	"raft"
@@ -38,7 +39,7 @@ type Op struct {
 	Value 		string
 }
 
-type kvServerState struct {
+type KVServerState struct {
 	Database 		   map[string]string
 	LastRequestID 	   map[int64]int
 	LastResponse 	   map[int64]string
@@ -231,12 +232,12 @@ func (kv *KVServer) Apply() {
 		if !msg.CommandValid {
 			kv.applyCond.L.Lock()
 			kv.mu.Lock()
-
+			
 			sp, ok := msg.Command.(raft.Snapshot)
 			if !ok {
 				fmt.Println("In Apply: type error")
 			}
-			state, ok2 := sp.ApplicationState.(kvServerState)
+			state, ok2 := sp.ApplicationState.(KVServerState)
 			if !ok2 {
 				fmt.Println("In Apply: type error")
 			}
@@ -244,7 +245,7 @@ func (kv *KVServer) Apply() {
 			kv.database = state.Database
 			kv.lastRequestID = state.LastRequestID
 			kv.lastResponse = state.LastResponse
-
+			
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			continue
@@ -305,7 +306,7 @@ func (kv *KVServer) saveSnapshot(index, term int) {
 	}
 
 	DPrintf("server %d, maxraftstate is %d, raftstatesize is %d \n", kv.me, kv.maxraftstate, kv.persister.RaftStateSize())
-	sp := raft.Snapshot{index, term, kvServerState{kv.database, kv.lastRequestID, kv.lastResponse}}
+	sp := raft.Snapshot{index, term, KVServerState{kv.database, kv.lastRequestID, kv.lastResponse}}
 	DPrintf("server %d call raft.Snapshot \n", kv.me)
 	kv.rf.SaveSnapshot(sp)
 	DPrintf("server %d call raft.Snapshot return \n", kv.me)
@@ -364,7 +365,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	
+	gob.Register(KVServerState{})
 
 	// You may need initialization code here.
 	

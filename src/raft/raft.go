@@ -72,12 +72,7 @@ type ApplyMsg struct {
 type Snapshot struct {
 	LastIncludedIndex  int
 	LastIncludedTerm   int
-	/*
-	Database 		   map[string]string
-	LastRequestID 	   map[int64]int
-	LastResponse 	   map[int64]string
-	*/
-	ApplicationState 	interface{}
+	ApplicationState   interface{}
 }
 
 //
@@ -163,7 +158,6 @@ func (rf *Raft) SaveSnapshot(sp Snapshot) {
 	debugln("raft ", rf.me, " now have spIncludedTerm : ", rf.spIncludedTerm)
 
 	debugln("raft ", rf.me, " save sp ", sp)
-
 	// Encode state
 	w1 := new(bytes.Buffer)
 	e1 := labgob.NewEncoder(w1)
