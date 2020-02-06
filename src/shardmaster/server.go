@@ -37,6 +37,10 @@ type Op struct {
 	Num 		int 				// args for Query
 }
 
+type RevMap struct {
+	GID 	int
+	Shards 	int
+}
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
@@ -340,6 +344,182 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 
 	return
 }
+
+
+func (sm *ShardMaster) Apply() {
+	for {
+		msg, ok := <- sm.applyCh
+		if !ok {
+			return
+		}
+		DPrintln(" Server ", sm.me, " Apply receive ", msg)
+		
+		sm.applyCond.L.Lock()
+		sm.mu.Lock()
+
+		index := msg.CommandIndex
+		term := msg.CommandTerm
+		op, ok := msg.Command.(Op)
+		if !ok {
+			fmt.Println("In Apply: type error")
+		}
+		sm.Request[index] = op 
+		if op.RequestId > kv.lastRequestID[op.Cid] {
+			sm.lastRequestID[op.Cid] = op.RequestId
+
+			oldCfg := sm.configs[len(sm.configs)-1]
+			newCfg := Config{Num: len(sm.configs)}
+			newCfg.Groups = map[int][]string{}
+			groupCnt := 0
+			var avg int
+			groupNum := make(map[int]int)  // map[GID] = #shards on GID
+			// Copy old Groups to new Groups
+			for k, v := range oldCfg.Groups {
+				newCfg.Groups[k] = v
+				groupNum[k] = 0
+				groupCnt++
+			}
+
+			DPrintln(" Server ", sm.me, " Apply  ", msg)
+			if op.OpType == "Join" {
+				for k, v := range op.Servers {
+					newCfg.Groups[k] = v
+					groupNum[k] = 0
+					groupCnt++
+				}
+				avg = len(oldCfg.Shards) / groupCnt
+				x := len(oldCfg.Shards) - avg * groupCnt // num for avg+1
+				y := len(oldCfg.Shards) - x 			// num for avg
+
+				
+				for i, k := range oldCfg.Shards {
+					if _, ok := newCfg.Groups[k]; ok {
+						groupNum[k]++
+					}
+				}
+
+				rev := make([]RevMap, 0, 0)
+				for k, num : = range groupNum {
+					rev = append(rev, RevMap{k, num})
+				}
+
+				sort.Slice(rev, func(i, j int) bool {
+					return rev[i].Shards > rev[j].Shards || (rev[i].Shards == rev[j].Shards && rev[i].GID < rev[j].GID)
+				})
+
+				for i, RM := range rev {
+					if i < x {
+						groupNum[RM.GID] = groupNum[RM.GID] - (avg + 1)
+					} else {
+						groupNum[RM.GID] = groupNum[RM.GID] - avg
+					}
+				}
+
+				for i, k := range oldCfg.Shards {
+					if _, ok := newCfg.Groups[k]; ok {
+						if groupNum[k] <= 0 {
+							newCfg.Shards[i] = k
+							continue
+						}
+						groupNum[k]--
+					}
+					for j := groupCnt-1; j >= 0; j-- {
+						if groupNum[rev[j].GID] < 0 {
+							newCfg.Shards[i] = rev[j].GID
+							groupNum[rev[j].GID]++
+							break
+						}
+					}
+				}
+				sm.configs = append(sm.configs, newCfg)
+			} else if op.OpType == "Leave" {
+				for _, k := range op.GIDs {
+					delete(newCfg.Groups, k)
+					delete(groupNum, k)
+					groupCnt--
+				}
+				avg = len(oldCfg.Shards) / groupCnt
+				x := len(oldCfg.Shards) - avg * groupCnt // num for avg+1
+				y := len(oldCfg.Shards) - x 			// num for avg
+
+				
+				for i, k := range oldCfg.Shards {
+					if _, ok := newCfg.Groups[k]; ok {
+						groupNum[k]++
+					}
+				}
+
+				rev := make([]RevMap, 0, 0)
+				for k, num : = range groupNum {
+					rev = append(rev, RevMap{k, num})
+				}
+
+				sort.Slice(rev, func(i, j int) bool {
+					return rev[i].Shards > rev[j].Shards || (rev[i].Shards == rev[j].Shards && rev[i].GID < rev[j].GID)
+				})
+
+				for i, RM := range rev {
+					if i < x {
+						groupNum[RM.GID] = groupNum[RM.GID] - (avg + 1)
+					} else {
+						groupNum[RM.GID] = groupNum[RM.GID] - avg
+					}
+				}
+
+				for i, k := range oldCfg.Shards {
+					if _, ok := newCfg.Groups[k]; ok {
+						if groupNum[k] <= 0 {
+							newCfg.Shards[i] = k
+							continue
+						}
+						groupNum[k]--
+					}
+					for j := groupCnt-1; j >= 0; j-- {
+						if groupNum[rev[j].GID] < 0 {
+							newCfg.Shards[i] = rev[j].GID
+							groupNum[rev[j].GID]++
+							break
+						}
+					}
+				}
+				sm.configs = append(sm.configs, newCfg)
+				
+			} else if op.Type == "Move" {
+				for i, k := range oldCfg.Shards {
+					newCfg.Shards[i] = k
+				}
+				newCfg.Shards[op.Shard] = op.GID
+
+				sm.configs = append(sm.configs, newCfg)
+
+			} else if op.Type == "Query" {
+				if op.Num < len(sm.configs) && op.Num >= 0 {
+					sm.lastResponse[op.Cid] = sm.configs[op.Num]
+				} else {
+					sm.lastResponse[op.Cid] = sm.configs[len(sm.configs) - 1] 
+				}
+			} else {
+				fmt.Println("In Apply: Optype Errror")
+			}
+		}
+
+		sm.applyCond.Broadcast()
+
+		//DPrintln(kv.Request[index])
+
+		for sm.waitRequest[index] == 1 {
+			sm.mu.Unlock()
+			sm.applyCond.Wait()
+			sm.mu.Lock()
+		}
+
+		delete(sm.Request, index)
+
+		sm.mu.Unlock()
+		sm.applyCond.L.Unlock()
+	}
+}
+
 
 
 //
