@@ -31,7 +31,8 @@ type Op struct {
 	RequestId 	int
 	Optype 		string 				// Join, Leave, Move, or Query
 	Servers 	map[int][]string 	// args for Join
-	GIDs 		[]int 				// args for Leave or Move
+	GIDs 		[]int 				// args for Leave 
+	GID 		int 				// args for Move
 	Shard 		int 				// args for Move
 	Num 		int 				// args for Query
 }
@@ -189,6 +190,78 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 
 func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 	// Your code here.
+	sm.mu.Lock()
+
+	if args.RequestId <= sm.lastRequestID[args.Cid] {
+		reply.WrongLeader = false
+		DPrintln("In server Move complete clerk = ", args.Cid," RequestId = ", args.RequestId)
+		sm.mu.Unlock()
+		return 
+	}
+
+	cmd := Op{
+			Cid: args.Cid
+			RequestId: args.RequestId
+			Optype: "Move", 
+			Shard: args.Shard
+			GID: args.GID}
+	index, term, isLeader := sm.rf.Start(cmd)
+	if !isLeader {
+		reply.WrongLeader = true
+		sm.mu.Unlock()
+		return
+	}
+	reply.WrongLeader = false
+	sm.waitRequest[index] = 1
+	DPrintf("In server %d Move index = %d \n", sm.me, index)
+	sm.mu.Unlock()
+
+	sm.applyCond.L.Lock()
+	sm.mu.Lock()
+	for _, ok := sm.Request[index]; !ok; _, ok = sm.Request[index]  {
+		sm.mu.Unlock()
+		sm.applyCond.Wait()
+		sm.mu.Lock()
+
+		if sm.shutdown {
+			delete(sm.waitRequest, index)
+			sm.applyCond.Broadcast()
+			reply.WrongLeader = true
+			sm.mu.Unlock()
+			sm.applyCond.L.Unlock()
+			return 
+		}
+
+		curTerm, curIsLeader := sm.rf.GetState()
+		if curTerm != term || !curIsLeader {
+			delete(sm.waitRequest, index)
+			//kv.waitRequest[index] = 0
+			reply.WrongLeader = true
+			sm.applyCond.Broadcast()
+			DPrintf("In server Move %d not leader any more index %d failed", kv.me, index)
+			sm.mu.Unlock()
+			sm.applyCond.L.Unlock()
+			return 
+		}
+
+	}
+	if sm.Request[index] != cmd {
+		delete(sm.waitRequest, index)
+		reply.WrongLeader = true
+		DPrintf("In server Move index %d not origin", index)
+		sm.applyCond.Broadcast()
+		sm.mu.Unlock()
+		sm.applyCond.L.Unlock()
+		return
+	}
+
+	delete(sm.waitRequest, index)
+	DPrintln("In server Move complete ", index)
+	sm.applyCond.Broadcast()
+	sm.mu.Unlock()
+	sm.applyCond.L.Unlock()
+
+	return
 }
 
 func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
