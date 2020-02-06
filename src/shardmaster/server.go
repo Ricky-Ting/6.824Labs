@@ -27,6 +27,8 @@ type ShardMaster struct {
 
 type Op struct {
 	// Your data here.
+	Cid 		int64
+	RequestId 	int
 	Optype 		string 				// Join, Leave, Move, or Query
 	Servers 	map[int][]string 	// args for Join
 	GIDs 		[]int 				// args for Leave or Move
@@ -37,6 +39,18 @@ type Op struct {
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
+	sm.mu.Lock()
+	
+	if args.RequestId <= sm.lastRequestID[args.Cid] {
+		reply.WrongLeader = false
+		DPrintln("In server Join complete clerk = ", args.Cid," RequestId = ", args.RequestId)
+		kv.mu.Unlock()
+		return 
+	}
+
+	cmd := Op{ 
+			Optype: "Join", 
+			Servers: args.Servers}
 }
 
 func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
