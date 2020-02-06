@@ -5,6 +5,27 @@ import "raft"
 import "labrpc"
 import "sync"
 import "labgob"
+import "log"
+import "fmt"
+import "sort"
+import "time"
+
+
+const Debug = 0
+
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if Debug > 0 {
+		log.Printf(format, a...)
+	}
+	return
+}
+
+func DPrintln(a ...interface{}) (n int, err error) {
+	if Debug > 0 {
+		log.Println(a...)
+	}
+	return
+}
 
 
 type ShardMaster struct {
@@ -29,7 +50,7 @@ type Op struct {
 	// Your data here.
 	Cid 		int64
 	RequestId 	int
-	Optype 		string 				// Join, Leave, Move, or Query
+	OpType 		string 				// Join, Leave, Move, or Query
 	Servers 	map[int][]string 	// args for Join
 	GIDs 		[]int 				// args for Leave 
 	GID 		int 				// args for Move
@@ -41,6 +62,7 @@ type RevMap struct {
 	GID 	int
 	Shards 	int
 }
+
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
@@ -54,9 +76,9 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	}
 
 	cmd := Op{
-			Cid: args.Cid
-			RequestId: args.RequestId
-			Optype: "Join", 
+			Cid: args.Cid,
+			RequestId: args.RequestId,
+			OpType: "Join", 
 			Servers: args.Servers}
 	index, term, isLeader := sm.rf.Start(cmd)
 	if !isLeader {
@@ -91,14 +113,14 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 			//kv.waitRequest[index] = 0
 			reply.WrongLeader = true
 			sm.applyCond.Broadcast()
-			DPrintf("In server Join %d not leader any more index %d failed", kv.me, index)
+			DPrintf("In server Join %d not leader any more index %d failed", sm.me, index)
 			sm.mu.Unlock()
 			sm.applyCond.L.Unlock()
 			return 
 		}
 
 	}
-	if sm.Request[index] != cmd {
+	if sm.Request[index].Cid != cmd.Cid || sm.Request[index].RequestId != cmd.RequestId {
 		delete(sm.waitRequest, index)
 		reply.WrongLeader = true
 		DPrintf("In server Join index %d not origin", index)
@@ -129,9 +151,9 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 	}
 
 	cmd := Op{
-			Cid: args.Cid
-			RequestId: args.RequestId
-			Optype: "Leave", 
+			Cid: args.Cid,
+			RequestId: args.RequestId,
+			OpType: "Leave", 
 			GIDs: args.GIDs}
 	index, term, isLeader := sm.rf.Start(cmd)
 	if !isLeader {
@@ -166,14 +188,14 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 			//kv.waitRequest[index] = 0
 			reply.WrongLeader = true
 			sm.applyCond.Broadcast()
-			DPrintf("In server Leave %d not leader any more index %d failed", kv.me, index)
+			DPrintf("In server Leave %d not leader any more index %d failed", sm.me, index)
 			sm.mu.Unlock()
 			sm.applyCond.L.Unlock()
 			return 
 		}
 
 	}
-	if sm.Request[index] != cmd {
+	if sm.Request[index].Cid != cmd.Cid || sm.Request[index].RequestId != cmd.RequestId {
 		delete(sm.waitRequest, index)
 		reply.WrongLeader = true
 		DPrintf("In server Leave index %d not origin", index)
@@ -204,10 +226,10 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 	}
 
 	cmd := Op{
-			Cid: args.Cid
-			RequestId: args.RequestId
-			Optype: "Move", 
-			Shard: args.Shard
+			Cid: args.Cid,
+			RequestId: args.RequestId,
+			OpType: "Move", 
+			Shard: args.Shard,
 			GID: args.GID}
 	index, term, isLeader := sm.rf.Start(cmd)
 	if !isLeader {
@@ -242,14 +264,14 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 			//kv.waitRequest[index] = 0
 			reply.WrongLeader = true
 			sm.applyCond.Broadcast()
-			DPrintf("In server Move %d not leader any more index %d failed", kv.me, index)
+			DPrintf("In server Move %d not leader any more index %d failed", sm.me, index)
 			sm.mu.Unlock()
 			sm.applyCond.L.Unlock()
 			return 
 		}
 
 	}
-	if sm.Request[index] != cmd {
+	if sm.Request[index].Cid != cmd.Cid || sm.Request[index].RequestId != cmd.RequestId {
 		delete(sm.waitRequest, index)
 		reply.WrongLeader = true
 		DPrintf("In server Move index %d not origin", index)
@@ -281,9 +303,9 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 	}
 
 	cmd := Op{
-			Cid: args.Cid
-			RequestId: args.RequestId
-			Optype: "Query", 
+			Cid: args.Cid,
+			RequestId: args.RequestId,
+			OpType: "Query", 
 			Num: args.Num}
 	index, term, isLeader := sm.rf.Start(cmd)
 	if !isLeader {
@@ -318,14 +340,14 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 			//kv.waitRequest[index] = 0
 			reply.WrongLeader = true
 			sm.applyCond.Broadcast()
-			DPrintf("In server Query %d not leader any more index %d failed", kv.me, index)
+			DPrintf("In server Query %d not leader any more index %d failed", sm.me, index)
 			sm.mu.Unlock()
 			sm.applyCond.L.Unlock()
 			return 
 		}
 
 	}
-	if sm.Request[index] != cmd {
+	if sm.Request[index].Cid != cmd.Cid || sm.Request[index].RequestId != cmd.RequestId {
 		delete(sm.waitRequest, index)
 		reply.WrongLeader = true
 		DPrintf("In server Query index %d not origin", index)
@@ -358,13 +380,13 @@ func (sm *ShardMaster) Apply() {
 		sm.mu.Lock()
 
 		index := msg.CommandIndex
-		term := msg.CommandTerm
+		//term := msg.CommandTerm
 		op, ok := msg.Command.(Op)
 		if !ok {
 			fmt.Println("In Apply: type error")
 		}
 		sm.Request[index] = op 
-		if op.RequestId > kv.lastRequestID[op.Cid] {
+		if op.RequestId > sm.lastRequestID[op.Cid] {
 			sm.lastRequestID[op.Cid] = op.RequestId
 
 			oldCfg := sm.configs[len(sm.configs)-1]
@@ -387,47 +409,48 @@ func (sm *ShardMaster) Apply() {
 					groupNum[k] = 0
 					groupCnt++
 				}
-				avg = len(oldCfg.Shards) / groupCnt
-				x := len(oldCfg.Shards) - avg * groupCnt // num for avg+1
-				y := len(oldCfg.Shards) - x 			// num for avg
-
-				
-				for i, k := range oldCfg.Shards {
-					if _, ok := newCfg.Groups[k]; ok {
-						groupNum[k]++
-					}
-				}
-
-				rev := make([]RevMap, 0, 0)
-				for k, num : = range groupNum {
-					rev = append(rev, RevMap{k, num})
-				}
-
-				sort.Slice(rev, func(i, j int) bool {
-					return rev[i].Shards > rev[j].Shards || (rev[i].Shards == rev[j].Shards && rev[i].GID < rev[j].GID)
-				})
-
-				for i, RM := range rev {
-					if i < x {
-						groupNum[RM.GID] = groupNum[RM.GID] - (avg + 1)
-					} else {
-						groupNum[RM.GID] = groupNum[RM.GID] - avg
-					}
-				}
-
-				for i, k := range oldCfg.Shards {
-					if _, ok := newCfg.Groups[k]; ok {
-						if groupNum[k] <= 0 {
-							newCfg.Shards[i] = k
-							continue
+				if groupCnt != 0 {
+					avg = len(oldCfg.Shards) / groupCnt
+					x := len(oldCfg.Shards) - avg * groupCnt // num for avg+1
+					//y := len(oldCfg.Shards) - x 			// num for avg
+					
+					for _, k := range oldCfg.Shards {
+						if _, ok := newCfg.Groups[k]; ok {
+							groupNum[k]++
 						}
-						groupNum[k]--
 					}
-					for j := groupCnt-1; j >= 0; j-- {
-						if groupNum[rev[j].GID] < 0 {
-							newCfg.Shards[i] = rev[j].GID
-							groupNum[rev[j].GID]++
-							break
+
+					rev := make([]RevMap, 0, 0)
+					for k, num := range groupNum {
+						rev = append(rev, RevMap{k, num})
+					}
+
+					sort.Slice(rev, func(i, j int) bool {
+						return rev[i].Shards > rev[j].Shards || (rev[i].Shards == rev[j].Shards && rev[i].GID < rev[j].GID)
+					})
+
+					for i, RM := range rev {
+						if i < x {
+							groupNum[RM.GID] = groupNum[RM.GID] - (avg + 1)
+						} else {
+							groupNum[RM.GID] = groupNum[RM.GID] - avg
+						}
+					}
+
+					for i, k := range oldCfg.Shards {
+						if _, ok := newCfg.Groups[k]; ok {
+							if groupNum[k] <= 0 {
+								newCfg.Shards[i] = k
+								continue
+							}
+							groupNum[k]--
+						}
+						for j := groupCnt-1; j >= 0; j-- {
+							if groupNum[rev[j].GID] < 0 {
+								newCfg.Shards[i] = rev[j].GID
+								groupNum[rev[j].GID]++
+								break
+							}
 						}
 					}
 				}
@@ -438,53 +461,54 @@ func (sm *ShardMaster) Apply() {
 					delete(groupNum, k)
 					groupCnt--
 				}
-				avg = len(oldCfg.Shards) / groupCnt
-				x := len(oldCfg.Shards) - avg * groupCnt // num for avg+1
-				y := len(oldCfg.Shards) - x 			// num for avg
-
-				
-				for i, k := range oldCfg.Shards {
-					if _, ok := newCfg.Groups[k]; ok {
-						groupNum[k]++
-					}
-				}
-
-				rev := make([]RevMap, 0, 0)
-				for k, num : = range groupNum {
-					rev = append(rev, RevMap{k, num})
-				}
-
-				sort.Slice(rev, func(i, j int) bool {
-					return rev[i].Shards > rev[j].Shards || (rev[i].Shards == rev[j].Shards && rev[i].GID < rev[j].GID)
-				})
-
-				for i, RM := range rev {
-					if i < x {
-						groupNum[RM.GID] = groupNum[RM.GID] - (avg + 1)
-					} else {
-						groupNum[RM.GID] = groupNum[RM.GID] - avg
-					}
-				}
-
-				for i, k := range oldCfg.Shards {
-					if _, ok := newCfg.Groups[k]; ok {
-						if groupNum[k] <= 0 {
-							newCfg.Shards[i] = k
-							continue
+				if groupCnt != 0 {
+					avg = len(oldCfg.Shards) / groupCnt
+					x := len(oldCfg.Shards) - avg * groupCnt // num for avg+1
+					//y := len(oldCfg.Shards) - x 			// num for avg
+					
+					for _, k := range oldCfg.Shards {
+						if _, ok := newCfg.Groups[k]; ok {
+							groupNum[k]++
 						}
-						groupNum[k]--
 					}
-					for j := groupCnt-1; j >= 0; j-- {
-						if groupNum[rev[j].GID] < 0 {
-							newCfg.Shards[i] = rev[j].GID
-							groupNum[rev[j].GID]++
-							break
+
+					rev := make([]RevMap, 0, 0)
+					for k, num := range groupNum {
+						rev = append(rev, RevMap{k, num})
+					}
+
+					sort.Slice(rev, func(i, j int) bool {
+						return rev[i].Shards > rev[j].Shards || (rev[i].Shards == rev[j].Shards && rev[i].GID < rev[j].GID)
+					})
+
+					for i, RM := range rev {
+						if i < x {
+							groupNum[RM.GID] = groupNum[RM.GID] - (avg + 1)
+						} else {
+							groupNum[RM.GID] = groupNum[RM.GID] - avg
+						}
+					}
+
+					for i, k := range oldCfg.Shards {
+						if _, ok := newCfg.Groups[k]; ok {
+							if groupNum[k] <= 0 {
+								newCfg.Shards[i] = k
+								continue
+							}
+							groupNum[k]--
+						}
+						for j := groupCnt-1; j >= 0; j-- {
+							if groupNum[rev[j].GID] < 0 {
+								newCfg.Shards[i] = rev[j].GID
+								groupNum[rev[j].GID]++
+								break
+							}
 						}
 					}
 				}
 				sm.configs = append(sm.configs, newCfg)
 				
-			} else if op.Type == "Move" {
+			} else if op.OpType == "Move" {
 				for i, k := range oldCfg.Shards {
 					newCfg.Shards[i] = k
 				}
@@ -492,14 +516,14 @@ func (sm *ShardMaster) Apply() {
 
 				sm.configs = append(sm.configs, newCfg)
 
-			} else if op.Type == "Query" {
+			} else if op.OpType == "Query" {
 				if op.Num < len(sm.configs) && op.Num >= 0 {
 					sm.lastResponse[op.Cid] = sm.configs[op.Num]
 				} else {
 					sm.lastResponse[op.Cid] = sm.configs[len(sm.configs) - 1] 
 				}
 			} else {
-				fmt.Println("In Apply: Optype Errror")
+				fmt.Println("In Apply: OpType Errror")
 			}
 		}
 
@@ -561,7 +585,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	// Your code here.
 	sm.applyCond = sync.NewCond(new(sync.Mutex))
 	sm.lastRequestID = make(map[int64]int)
-	sm.lastResponse = make(map[int64]string)
+	sm.lastResponse = make(map[int64]Config)
 	sm.waitRequest = make(map[int]int)
 	sm.Request = make(map[int]Op)
 	sm.shutdown = false

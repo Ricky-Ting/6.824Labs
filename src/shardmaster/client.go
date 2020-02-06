@@ -8,6 +8,8 @@ import "labrpc"
 import "time"
 import "crypto/rand"
 import "math/big"
+import "sync"
+
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
