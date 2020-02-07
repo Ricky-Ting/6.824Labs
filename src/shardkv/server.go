@@ -34,6 +34,7 @@ type ShardKV struct {
 	waitRequest map[int]int  // map[index] = 0, 1 : whether a goroutine wait for index
 	Request 	map[int]Op 	 // map[index] = Op
 	shutdown 	bool
+	mck 		*shardmaster.Clerk
 }
 
 
@@ -98,13 +99,34 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.masters = masters
 
 	// Your initialization code here.
+	kv.persister = persister
+	kv.database = make(map[string]string)
+	kv.applyCond = sync.NewCond(new(sync.Mutex))
+	kv.lastRequestID = make(map[int64]int)
+	kv.lastResponse = make(map[int64]string)
+	kv.waitRequest = make(map[int]int)
+	kv.Request = make(map[int]Op)
+	kv.shutdown = false
 
 	// Use something like this to talk to the shardmaster:
-	// kv.mck = shardmaster.MakeClerk(kv.masters)
+	kv.mck = shardmaster.MakeClerk(kv.masters)
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	go kv.Apply()
+
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			kv.mu.Lock()
+			if kv.shutdown {
+				return
+			}
+			kv.mu.Unlock()
+			kv.applyCond.Broadcast()
+		}
+	}()
 
 	return kv
 }
