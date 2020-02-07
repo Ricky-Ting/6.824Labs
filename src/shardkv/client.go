@@ -14,6 +14,7 @@ import "math/big"
 import "shardmaster"
 import "time"
 import "sync"
+import "fmt"
 
 //
 // which shard is a key in?
@@ -61,6 +62,7 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.make_end = make_end
 	// You'll have to add code here.
 	ck.cid = nrand()
+	fmt.Println("Make Clerk cid is ", ck.cid)
 	ck.lastRequestId = 0
 
 	return ck
@@ -78,6 +80,7 @@ func (ck *Clerk) Get(key string) string {
 	
 	// Detect duplicate requests
 	ck.mu.Lock()
+	args.Cid = ck.cid
 	args.RequestId = ck.lastRequestId + 1
 	ck.lastRequestId++
 	ck.mu.Unlock()
@@ -119,6 +122,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	// Detect duplicate requests
 	ck.mu.Lock()
+	args.Cid = ck.cid
 	args.RequestId = ck.lastRequestId + 1
 	ck.lastRequestId++
 	ck.mu.Unlock()
