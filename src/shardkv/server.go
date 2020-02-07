@@ -310,13 +310,15 @@ func (kv *ShardKV) Apply() {
 
 func (kv *ShardKV) CheckConfig() {
 	for {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		kv.mu.Lock()
 		if _, isLeader := kv.rf.GetState(); !isLeader {
 			kv.mu.Unlock()
 			continue
 		}
+		kv.mu.Unlock()
 		config := kv.mck.Query(-1)
+		kv.mu.Lock()
 		if config.Num <= kv.cfg.Num {
 			kv.mu.Unlock()
 			continue
