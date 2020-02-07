@@ -110,6 +110,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	}
 
 	delete(kv.waitRequest, index)
+	reply.Err = OK
 	reply.Value = kv.lastResponse[args.Cid]
 	DPrintln("In server Get complete ", index)
 	kv.applyCond.Broadcast()
@@ -121,6 +122,84 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	kv.mu.Lock()
+	if key2shard(args.Key) != kv.shard {
+		reply.Err = ErrWrongGroup
+		kv.mu.Unlock()
+		return
+	}
+
+	if args.RequestId <= kv.lastRequestID[args.Cid] {
+		reply.WrongLeader = false
+		reply.Err = OK
+		//reply.Value = lastResponse[args.Cid]
+		DPrintln("In server PutAppend complete clerk = ", args.Cid," RequestId = ", args.RequestId)
+		kv.mu.Unlock()
+		return 
+	}
+
+	cmd := Op{args.Cid, args.RequestId, args.Op, args.Key, args.Value}
+	index, term, isLeader := kv.rf.Start(cmd)
+	if !isLeader {
+		reply.WrongLeader = true
+		kv.mu.Unlock()
+		return
+	}
+	reply.WrongLeader = false
+	kv.waitRequest[index] = 1
+	kv.mu.Unlock()
+
+	DPrintln("In server ", kv.me, " ", args, " index = ", index)
+
+	kv.applyCond.L.Lock()
+	kv.mu.Lock()
+	for _, ok := kv.Request[index]; !ok; _, ok = kv.Request[index]  {
+		//DPrintln("In server Put ", v, " ", ok)
+		kv.mu.Unlock()
+		kv.applyCond.Wait()
+		kv.mu.Lock()
+
+		if kv.shutdown {
+			delete(kv.waitRequest, index)
+			kv.applyCond.Broadcast()
+			reply.WrongLeader = true
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
+
+		//DPrintln("In server PutAppend", kv.Request[index] )
+		curTerm, curIsLeader := kv.rf.GetState()
+		if curTerm != term || !curIsLeader {
+			delete(kv.waitRequest, index)
+			kv.applyCond.Broadcast()
+			reply.WrongLeader = true
+			DPrintf("In server PutAppend %d not leader any more index %d failed", kv.me, index)
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
+
+	}
+
+	
+	if kv.Request[index] != cmd {
+		delete(kv.waitRequest, index)
+		kv.applyCond.Broadcast()
+		reply.WrongLeader = true
+		DPrintf("In server PutAppend index %d not origin", index)
+		kv.mu.Unlock()
+		kv.applyCond.L.Unlock()
+		return
+	}
+	delete(kv.waitRequest, index)
+	reply.Err = OK
+	DPrintln("In server PutAppend complete ", index)
+	kv.applyCond.Broadcast()
+	kv.mu.Unlock()
+	kv.applyCond.L.Unlock()
+
+	return
 }
 
 //
