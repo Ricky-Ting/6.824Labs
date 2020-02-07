@@ -18,7 +18,7 @@ type Op struct {
 	OpType 		string  // Get, Put, Append or Config
 	Key 		string
 	Value 		string
-	Shards 		[]int
+	Cfg 		shardmaster.Config		
 }
 
 type ShardKV struct {
@@ -41,7 +41,7 @@ type ShardKV struct {
 	Request 	map[int]Op 	 // map[index] = Op
 	shutdown 	bool
 	mck 		*shardmaster.Clerk
-	shards 		[]int 		// 
+	cfg 		shardmaster.Config
 }
 
 
@@ -258,6 +258,26 @@ func (kv *KVServer) Apply() {
 }
 
 
+func (kv *KVServer) CheckConfig() {
+	for {
+		time.Sleep(500 * time.Millisecond)
+		kv.mu.Lock()
+		if _, isLeader := kv.rf.GetState(); !isLeader {
+			kv.mu.Unlock()
+			continue
+		}
+		config := kv.mck.Query(-1)
+		if config.Num <= kv.cfg.Num {
+			kv.mu.Unlock()
+			continue
+		}
+		cmd := Op{0, 0, "Config", "", "", config}
+		_, _, _ := kv.rf.Start(cmd)
+		kv.mu.Unlock()
+	}
+}
+
+
 
 //
 // the tester calls Kill() when a ShardKV instance won't
@@ -320,6 +340,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.waitRequest = make(map[int]int)
 	kv.Request = make(map[int]Op)
 	kv.shutdown = false
+	kv.cfg.Num = 0
 
 	// Use something like this to talk to the shardmaster:
 	kv.mck = shardmaster.MakeClerk(kv.masters)
@@ -328,6 +349,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.Apply()
+	go kv.CheckConfig()	
 
 	go func() {
 		for {
