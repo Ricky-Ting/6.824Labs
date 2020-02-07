@@ -1,13 +1,30 @@
 package shardkv
 
 
-// import "shardmaster"
+import "shardmaster"
 import "labrpc"
 import "raft"
 import "sync"
 import "labgob"
+import "fmt"
+import "log"
+import "time"
 
+const Debug = 0
 
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if Debug > 0 {
+		log.Printf(format, a...)
+	}
+	return
+}
+
+func DPrintln(a ...interface{}) (n int, err error) {
+	if Debug > 0 {
+		log.Println(a...)
+	}
+	return
+}
 
 type Op struct {
 	// Your definitions here.
@@ -49,26 +66,27 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.mu.Lock()
 	shard := key2shard(args.Key)
-	if shard >= len(kv.shards) || kv.shards[shard] != kv.gid {
+	if shard >= len(kv.cfg.Shards) || kv.cfg.Shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
 	}
+	DPrintf("Key %s map to %d \n", args.Key, shard)
 
 	if args.RequestId <= kv.lastRequestID[args.Cid] {
 		reply.WrongLeader = false
 		if kv.lastResponse[args.Cid] != ErrWrongGroup {
 			reply.Err = OK
 			reply.Value = kv.lastResponse[args.Cid]
+			DPrintln("Gid = ", kv.gid, " In server Get complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		} else {
 			reply.Err = ErrWrongGroup
 		}
-		DPrintln("In server Get complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
 	}
 
-	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, ""}
+	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, "", shardmaster.Config{}}
 	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -77,7 +95,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	}
 	reply.WrongLeader = false
 	kv.waitRequest[index] = 1
-	DPrintf("In server %d Get %s index = %d \n", kv.me, args.Key, index)
+	DPrintln("Gid = ", kv.gid, " In server ", kv.me, " ", args, " index = ", index)
 	kv.mu.Unlock()
 
 	kv.applyCond.L.Lock()
@@ -102,18 +120,18 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 			//kv.waitRequest[index] = 0
 			reply.WrongLeader = true
 			kv.applyCond.Broadcast()
-			DPrintf("In server Get %d not leader any more index %d failed", kv.me, index)
+			DPrintf("Gid = %d In server Get %d not leader any more index %d failed", kv.gid, kv.me, index)
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return 
 		}
 
 	}
-	if kv.Request[index] != cmd {
+	if kv.Request[index].Cid != cmd.Cid || kv.Request[index].RequestId != cmd.RequestId {
 		delete(kv.waitRequest, index)
 		//kv.waitRequest[index] = 0
 		reply.WrongLeader = true
-		DPrintf("In server Get index %d not origin", index)
+		DPrintf("Gid = %d In server Get index %d not origin", kv.gid, index)
 		kv.applyCond.Broadcast()
 		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
@@ -124,10 +142,11 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	if kv.lastResponse[args.Cid] != ErrWrongGroup {
 		reply.Err = OK
 		reply.Value = kv.lastResponse[args.Cid]
+		DPrintln("Gid = ", kv.gid, " In server Get complete index = ", index)
 	} else {
 		reply.Err = ErrWrongGroup
 	}
-	DPrintln("In server Get complete ", index)
+	
 	kv.applyCond.Broadcast()
 	kv.mu.Unlock()
 	kv.applyCond.L.Unlock()
@@ -139,25 +158,25 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	kv.mu.Lock()
 	shard := key2shard(args.Key)
-	if shard >= len(kv.shards) || kv.shards[shard] != kv.gid {
+	if shard >= len(kv.cfg.Shards) || kv.cfg.Shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
 	}
-
+	DPrintf("Key %s map to %d \n", args.Key, shard)
 	if args.RequestId <= kv.lastRequestID[args.Cid] {
 		reply.WrongLeader = false
 		if kv.lastResponse[args.Cid] != ErrWrongGroup {
 			reply.Err = OK
+			DPrintln("Gid = ", kv.gid, " In server PutAppend complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		} else {
 			reply.Err = ErrWrongGroup
 		}
-		DPrintln("In server PutAppend complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
 	}
 
-	cmd := Op{args.Cid, args.RequestId, args.Op, args.Key, args.Value}
+	cmd := Op{args.Cid, args.RequestId, args.Op, args.Key, args.Value, shardmaster.Config{}}
 	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -168,7 +187,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.waitRequest[index] = 1
 	kv.mu.Unlock()
 
-	DPrintln("In server ", kv.me, " ", args, " index = ", index)
+	DPrintln("Gid = ", kv.gid, " In server ", kv.me, " ", args, " index = ", index)
 
 	kv.applyCond.L.Lock()
 	kv.mu.Lock()
@@ -193,7 +212,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 			delete(kv.waitRequest, index)
 			kv.applyCond.Broadcast()
 			reply.WrongLeader = true
-			DPrintf("In server PutAppend %d not leader any more index %d failed", kv.me, index)
+			DPrintf("Gid = %d In server PutAppend %d not leader any more index %d failed", kv.gid, kv.me, index)
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return 
@@ -202,11 +221,11 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 
 	
-	if kv.Request[index] != cmd {
+	if kv.Request[index].Cid != cmd.Cid || kv.Request[index].RequestId != cmd.RequestId {
 		delete(kv.waitRequest, index)
 		kv.applyCond.Broadcast()
 		reply.WrongLeader = true
-		DPrintf("In server PutAppend index %d not origin", index)
+		DPrintf("Gid = %d In server PutAppend index %d not origin", kv.gid, index)
 		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
 		return
@@ -214,10 +233,10 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	delete(kv.waitRequest, index)
 	if kv.lastResponse[args.Cid] != ErrWrongGroup {
 		reply.Err = OK
+		DPrintln("Gid = ", kv.gid, " In server PutAppend complete ", index)
 	} else {
 		reply.Err = ErrWrongGroup
 	}
-	DPrintln("In server PutAppend complete ", index)
 	kv.applyCond.Broadcast()
 	kv.mu.Unlock()
 	kv.applyCond.L.Unlock()
@@ -226,19 +245,19 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 
-func (kv *KVServer) Apply() {
+func (kv *ShardKV) Apply() {
 	for {
 		msg, ok := <- kv.applyCh
 		if !ok {
 			return
 		}
-		DPrintln(" Server ", kv.me, " Apply receive ", msg)
+		DPrintln("Gid = ", kv.gid, " Server ", kv.me, " Apply receive ", msg)
 
 		kv.applyCond.L.Lock()
 		kv.mu.Lock()
 
 		index := msg.CommandIndex
-		term := msg.CommandTerm
+		//term := msg.CommandTerm
 		op, ok := msg.Command.(Op)
 		if !ok {
 			fmt.Println("In Apply: type error")
@@ -254,10 +273,10 @@ func (kv *KVServer) Apply() {
 		}
 
 		kv.Request[index] = op 
-		if op.RequestId > kv.lastRequestID[op.Cid] && kv.shards[key2shard(op.Key)] == kv.gid {
+		if op.RequestId > kv.lastRequestID[op.Cid] && kv.cfg.Shards[key2shard(op.Key)] == kv.gid {
 			kv.lastRequestID[op.Cid] = op.RequestId
 			
-			DPrintln(" Server ", kv.me, " Apply  ", msg)
+			DPrintln("Gid = ", kv.gid, " Server ", kv.me, " Apply  ", msg)
 			if op.OpType == "Append" {
 				kv.database[op.Key] = kv.database[op.Key] + op.Value
 				kv.lastResponse[op.Cid] = OK
@@ -269,8 +288,8 @@ func (kv *KVServer) Apply() {
 			}
 		}
 
-		if kv.shards[key2shard(op.Key)] != kv.gid {
-			kv.lastResponse[op.Cid] == ErrWrongGroup
+		if kv.cfg.Shards[key2shard(op.Key)] != kv.gid {
+			kv.lastResponse[op.Cid] = ErrWrongGroup
 		}
 
 		kv.applyCond.Broadcast()
@@ -289,7 +308,7 @@ func (kv *KVServer) Apply() {
 }
 
 
-func (kv *KVServer) CheckConfig() {
+func (kv *ShardKV) CheckConfig() {
 	for {
 		time.Sleep(500 * time.Millisecond)
 		kv.mu.Lock()
@@ -303,7 +322,7 @@ func (kv *KVServer) CheckConfig() {
 			continue
 		}
 		cmd := Op{0, 0, "Config", "", "", config}
-		_, _, _ := kv.rf.Start(cmd)
+		kv.rf.Start(cmd)
 		kv.mu.Unlock()
 	}
 }

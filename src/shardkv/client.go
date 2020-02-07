@@ -14,7 +14,7 @@ import "math/big"
 import "shardmaster"
 import "time"
 import "sync"
-import "fmt"
+//import "fmt"
 
 //
 // which shard is a key in?
@@ -62,7 +62,7 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.make_end = make_end
 	// You'll have to add code here.
 	ck.cid = nrand()
-	fmt.Println("Make Clerk cid is ", ck.cid)
+	//fmt.Println("Make Clerk cid is ", ck.cid)
 	ck.lastRequestId = 0
 
 	return ck
