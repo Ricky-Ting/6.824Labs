@@ -202,6 +202,55 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	return
 }
 
+
+func (kv *KVServer) Apply() {
+	for {
+		msg, ok := <- kv.applyCh
+		if !ok {
+			return
+		}
+		DPrintln(" Server ", kv.me, " Apply receive ", msg)
+
+		kv.applyCond.L.Lock()
+		kv.mu.Lock()
+
+		index := msg.CommandIndex
+		term := msg.CommandTerm
+		op, ok := msg.Command.(Op)
+		if !ok {
+			fmt.Println("In Apply: type error")
+		}
+		kv.Request[index] = op 
+		if op.RequestId > kv.lastRequestID[op.Cid] {
+			kv.lastRequestID[op.Cid] = op.RequestId
+			
+			DPrintln(" Server ", kv.me, " Apply  ", msg)
+			if op.OpType == "Append" {
+				kv.database[op.Key] = kv.database[op.Key] + op.Value
+			} else if op.OpType == "Put" {
+				kv.database[op.Key] = op.Value
+			} else if op.OpType == "Get" {
+				kv.lastResponse[op.Cid] = kv.database[op.Key]
+			}
+		}
+
+		kv.applyCond.Broadcast()
+
+		for kv.waitRequest[index] == 1 {
+			kv.mu.Unlock()
+			kv.applyCond.Wait()
+			kv.mu.Lock()
+		}
+
+		delete(kv.Request, index)
+
+		kv.mu.Unlock()
+		kv.applyCond.L.Unlock()
+	}
+}
+
+
+
 //
 // the tester calls Kill() when a ShardKV instance won't
 // be needed again. you are not required to do anything
