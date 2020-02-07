@@ -315,6 +315,20 @@ func (kv *ShardKV) Apply() {
 				if kv.cfg.Shards[i] == kv.gid && op.Cfg.Shards[i] != kv.gid {
 					kv.isReady[i] = false
 					// Send RPCs
+					database := make(map[string]string)
+					lastRequestID := make(map[int64]int)
+					lastResponse := make(map[int64]string)
+					for k, v := range kv.database[i] {
+						database[k] = v
+					}
+					for k, v := range kv.lastRequestID[i] {
+						lastRequestID[k] = v
+					}
+					for k, v := range kv.lastResponse[i] {
+						lastResponse[k] = v
+					}
+
+					go kv.sendTransfer(op.Cfg.Groups[op.Cfg.Shards[i]] , op.Cfg.Num, i, database, lastRequestID, lastResponse)
 				}
 			}
 			kv.cfg = op.Cfg
