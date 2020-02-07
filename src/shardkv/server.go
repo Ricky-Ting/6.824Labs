@@ -401,6 +401,29 @@ func (kv *ShardKV) sendTransfer(servers []string, num int, shard int, database m
 	}
 }
 
+func (kv *ShardKV) Transfer(args *TransferArgs, reply, *TransferReply) {
+	kv.mu.Lock()
+
+	if args.Num < kv.Cfg.Num {
+		reply.Success = true
+		return
+	}
+	if args.Num > kv.Cfg.Num {
+		reply.Success = false
+		return
+	}
+	if kv.isReady[args.Shard] {
+		reply.Success = true
+		return
+	}
+	kv.database[args.Shard] = args.Database
+	kv.lastRequestID[args.Shard] = args.LastRequestID
+	kv.lastResponse[args.Shard] = args.LastResponse
+	kv.isReady[args.Shard] = true
+
+	kv.mu.Unlock()
+}
+
 
 //
 // the tester calls Kill() when a ShardKV instance won't
