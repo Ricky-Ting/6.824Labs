@@ -60,6 +60,7 @@ type ShardKV struct {
 	shutdown 		bool
 	mck 			*shardmaster.Clerk
 	cfg 			shardmaster.Config
+	isReady 		[shardmaster.NShards]bool
 }
 
 
@@ -82,18 +83,36 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 		kv.mu.Unlock()
 		return 
 	}
+	kv.mu.Unlock()
+
+	kv.applyCond.L.Lock()
+	kv.mu.Lock()
+	for !kv.isReady[shard] {
+		kv.mu.Unlock()
+		kv.applyCond.Wait()
+		kv.mu.Lock()
+		if kv.cfg.Shards[shard] != kv.gid {
+			reply.Err = ErrWrongGroup
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return
+		}
+		//DPrintln("Gid = ", kv.gid, " In server sleep")
+	}
 
 	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, "", shardmaster.Config{}}
 	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
 		kv.mu.Unlock()
+		kv.applyCond.L.Unlock()
 		return
 	}
 	reply.WrongLeader = false
 	kv.waitRequest[index] = 1
 	DPrintln("Gid = ", kv.gid, " In server ", kv.me, " ", args, " index = ", index)
 	kv.mu.Unlock()
+	kv.applyCond.L.Unlock()
 
 	kv.applyCond.L.Lock()
 	kv.mu.Lock()
@@ -168,17 +187,36 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		kv.mu.Unlock()
 		return 
 	}
+	kv.mu.Unlock()
+
+	kv.applyCond.L.Lock()
+	kv.mu.Lock()
+	for !kv.isReady[shard] {
+		kv.mu.Unlock()
+		kv.applyCond.Wait()
+		kv.mu.Lock()
+		if kv.cfg.Shards[shard] != kv.gid {
+			reply.Err = ErrWrongGroup
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return
+		}
+		//DPrintln("Gid = ", kv.gid, " In server sleep")
+		
+	}
 
 	cmd := Op{args.Cid, args.RequestId, args.Op, args.Key, args.Value, shardmaster.Config{}}
 	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
 		kv.mu.Unlock()
+		kv.applyCond.L.Unlock()
 		return
 	}
 	reply.WrongLeader = false
 	kv.waitRequest[index] = 1
 	kv.mu.Unlock()
+	kv.applyCond.L.Unlock()
 
 	DPrintln("Gid = ", kv.gid, " In server ", kv.me, " ", args, " index = ", index)
 
@@ -258,9 +296,29 @@ func (kv *ShardKV) Apply() {
 		}
 
 		if op.OpType == "Config" {
-			if op.Cfg.Num > kv.cfg.Num {
-				kv.cfg = op.Cfg
+			if op.Cfg.Num <= kv.cfg.Num {
+				DPrintln("outdate cfg")
+				kv.mu.Unlock()
+				kv.applyCond.L.Unlock()
+				continue
 			}
+			for i := 0; i < shardmaster.NShards; i++ {
+				if kv.cfg.Shards[i] == 0 && op.Cfg.Shards[i] == kv.gid {
+					kv.isReady[i] = true
+					DPrintf("In gid %d, server %d, shard %d is ready \n", kv.gid, kv.me, i)
+					continue
+				}
+				if kv.cfg.Shards[i] != kv.gid && op.Cfg.Shards[i] == kv.gid {
+					kv.isReady[i] = false
+					continue
+				}
+				if kv.cfg.Shards[i] == kv.gid && op.Cfg.Shards[i] != kv.gid {
+					kv.isReady[i] = false
+					// Send RPCs
+				}
+			}
+			kv.cfg = op.Cfg
+			kv.applyCond.Broadcast()
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			continue
