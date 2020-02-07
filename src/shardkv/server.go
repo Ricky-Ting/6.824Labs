@@ -18,7 +18,7 @@ type Op struct {
 	OpType 		string  // Get, Put, Append or Config
 	Key 		string
 	Value 		string
-	Shard 		int
+	Shards 		[]int
 }
 
 type ShardKV struct {
@@ -41,14 +41,15 @@ type ShardKV struct {
 	Request 	map[int]Op 	 // map[index] = Op
 	shutdown 	bool
 	mck 		*shardmaster.Clerk
-	shard 		int 		// current shard 
+	shards 		[]int 		// 
 }
 
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.mu.Lock()
-	if key2shard(args.Key) != kv.shard {
+	shard := key2shard(args.Key)
+	if shard >= len(kv.shards) || kv.shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
@@ -129,7 +130,8 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	kv.mu.Lock()
-	if key2shard(args.Key) != kv.shard {
+	shard := key2shard(args.Key)
+	if shard >= len(kv.shards) || kv.shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
@@ -318,7 +320,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.waitRequest = make(map[int]int)
 	kv.Request = make(map[int]Op)
 	kv.shutdown = false
-	kv.shard = -1
 
 	// Use something like this to talk to the shardmaster:
 	kv.mck = shardmaster.MakeClerk(kv.masters)
