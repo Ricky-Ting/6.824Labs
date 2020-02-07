@@ -13,6 +13,12 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Cid 		int64 	// Clerk's Id
+	RequestId 	int 	// Request's Id
+	OpType 		string  // Get, Put, Append or Config
+	Key 		string
+	Value 		string
+	Shard 		int
 }
 
 type ShardKV struct {
