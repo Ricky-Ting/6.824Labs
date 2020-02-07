@@ -50,15 +50,16 @@ type ShardKV struct {
 
 	// Your definitions here.
 	persister *raft.Persister
-	database 	map[string]string
-	applyCond 	*sync.Cond
-	lastRequestID map[int64]int // Record latest request for different clerks
-	lastResponse map[int64]string // Record latest response for different clerks
-	waitRequest map[int]int  // map[index] = 0, 1 : whether a goroutine wait for index
-	Request 	map[int]Op 	 // map[index] = Op
-	shutdown 	bool
-	mck 		*shardmaster.Clerk
-	cfg 		shardmaster.Config
+	database 		[shardmaster.NShards]map[string]string
+	applyCond 		*sync.Cond
+	lastRequestID 	[shardmaster.NShards]map[int64]int // Record latest request for different clerks
+	lastResponse 	[shardmaster.NShards]map[int64]string // Record latest response for different clerks
+	waitRequest 	map[int]int  // map[index] = 0, 1 : whether a goroutine wait for index
+	Request 		map[int]Op 	 // map[index] = Op
+	isWrongGroup 	map[int]bool // map[index] = isWrongGroup
+	shutdown 		bool
+	mck 			*shardmaster.Clerk
+	cfg 			shardmaster.Config
 }
 
 
@@ -66,22 +67,18 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.mu.Lock()
 	shard := key2shard(args.Key)
-	if shard >= len(kv.cfg.Shards) || kv.cfg.Shards[shard] != kv.gid {
+	if kv.cfg.Shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
 	}
 	DPrintf("Key %s map to %d \n", args.Key, shard)
 
-	if args.RequestId <= kv.lastRequestID[args.Cid] {
+	if args.RequestId <= kv.lastRequestID[shard][args.Cid] {
 		reply.WrongLeader = false
-		if kv.lastResponse[args.Cid] != ErrWrongGroup {
-			reply.Err = OK
-			reply.Value = kv.lastResponse[args.Cid]
-			DPrintln("Gid = ", kv.gid, " In server Get complete clerk = ", args.Cid," RequestId = ", args.RequestId)
-		} else {
-			reply.Err = ErrWrongGroup
-		}
+		reply.Err = OK
+		reply.Value = kv.lastResponse[shard][args.Cid]
+		DPrintln("Gid = ", kv.gid, " In server Get complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
 	}
@@ -129,7 +126,6 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	}
 	if kv.Request[index].Cid != cmd.Cid || kv.Request[index].RequestId != cmd.RequestId {
 		delete(kv.waitRequest, index)
-		//kv.waitRequest[index] = 0
 		reply.WrongLeader = true
 		DPrintf("Gid = %d In server Get index %d not origin", kv.gid, index)
 		kv.applyCond.Broadcast()
@@ -139,12 +135,13 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	}
 
 	delete(kv.waitRequest, index)
-	if kv.lastResponse[args.Cid] != ErrWrongGroup {
+	if !kv.isWrongGroup[index] {
 		reply.Err = OK
-		reply.Value = kv.lastResponse[args.Cid]
+		reply.Value = kv.lastResponse[shard][args.Cid]
 		DPrintln("Gid = ", kv.gid, " In server Get complete index = ", index)
 	} else {
 		reply.Err = ErrWrongGroup
+		delete(kv.isWrongGroup, index)
 	}
 	
 	kv.applyCond.Broadcast()
@@ -158,20 +155,16 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	kv.mu.Lock()
 	shard := key2shard(args.Key)
-	if shard >= len(kv.cfg.Shards) || kv.cfg.Shards[shard] != kv.gid {
+	if kv.cfg.Shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
 	}
 	DPrintf("Key %s map to %d \n", args.Key, shard)
-	if args.RequestId <= kv.lastRequestID[args.Cid] {
+	if args.RequestId <= kv.lastRequestID[shard][args.Cid] {
 		reply.WrongLeader = false
-		if kv.lastResponse[args.Cid] != ErrWrongGroup {
-			reply.Err = OK
-			DPrintln("Gid = ", kv.gid, " In server PutAppend complete clerk = ", args.Cid," RequestId = ", args.RequestId)
-		} else {
-			reply.Err = ErrWrongGroup
-		}
+		reply.Err = OK
+		DPrintln("Gid = ", kv.gid, " In server PutAppend complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
 	}
@@ -231,11 +224,12 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 	delete(kv.waitRequest, index)
-	if kv.lastResponse[args.Cid] != ErrWrongGroup {
+	if !kv.isWrongGroup[index] {
 		reply.Err = OK
 		DPrintln("Gid = ", kv.gid, " In server PutAppend complete ", index)
 	} else {
 		reply.Err = ErrWrongGroup
+		delete(kv.isWrongGroup, index)
 	}
 	kv.applyCond.Broadcast()
 	kv.mu.Unlock()
@@ -273,23 +267,24 @@ func (kv *ShardKV) Apply() {
 		}
 
 		kv.Request[index] = op 
-		if op.RequestId > kv.lastRequestID[op.Cid] && kv.cfg.Shards[key2shard(op.Key)] == kv.gid {
-			kv.lastRequestID[op.Cid] = op.RequestId
+		shard := key2shard(op.Key)
+		if op.RequestId > kv.lastRequestID[shard][op.Cid] && kv.cfg.Shards[shard] == kv.gid {
+			kv.lastRequestID[shard][op.Cid] = op.RequestId
 			
 			DPrintln("Gid = ", kv.gid, " Server ", kv.me, " Apply  ", msg)
 			if op.OpType == "Append" {
-				kv.database[op.Key] = kv.database[op.Key] + op.Value
-				kv.lastResponse[op.Cid] = OK
+				kv.database[shard][op.Key] = kv.database[shard][op.Key] + op.Value
+				kv.lastResponse[shard][op.Cid] = OK
 			} else if op.OpType == "Put" {
-				kv.database[op.Key] = op.Value
-				kv.lastResponse[op.Cid] = OK
+				kv.database[shard][op.Key] = op.Value
+				kv.lastResponse[shard][op.Cid] = OK
 			} else if op.OpType == "Get" {
-				kv.lastResponse[op.Cid] = kv.database[op.Key]
+				kv.lastResponse[shard][op.Cid] = kv.database[shard][op.Key]
 			}
 		}
 
-		if kv.cfg.Shards[key2shard(op.Key)] != kv.gid {
-			kv.lastResponse[op.Cid] = ErrWrongGroup
+		if kv.cfg.Shards[shard] != kv.gid {
+			kv.isWrongGroup[index] = true
 		}
 
 		kv.applyCond.Broadcast()
@@ -385,14 +380,18 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	// Your initialization code here.
 	kv.persister = persister
-	kv.database = make(map[string]string)
 	kv.applyCond = sync.NewCond(new(sync.Mutex))
-	kv.lastRequestID = make(map[int64]int)
-	kv.lastResponse = make(map[int64]string)
 	kv.waitRequest = make(map[int]int)
 	kv.Request = make(map[int]Op)
+	kv.isWrongGroup = make(map[int]bool)
 	kv.shutdown = false
 	kv.cfg.Num = 0
+
+	for i := 0; i < shardmaster.NShards; i++ {
+		kv.database[i] = make(map[string]string)
+		kv.lastRequestID[i] = make(map[int64]int)
+		kv.lastResponse[i] = make(map[int64]string)
+	}
 
 	// Use something like this to talk to the shardmaster:
 	kv.mck = shardmaster.MakeClerk(kv.masters)
