@@ -35,6 +35,7 @@ type ShardKV struct {
 	Request 	map[int]Op 	 // map[index] = Op
 	shutdown 	bool
 	mck 		*shardmaster.Clerk
+	shard 		int 		// current shard 
 }
 
 
@@ -107,6 +108,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.waitRequest = make(map[int]int)
 	kv.Request = make(map[int]Op)
 	kv.shutdown = false
+	kv.shard = -1
 
 	// Use something like this to talk to the shardmaster:
 	kv.mck = shardmaster.MakeClerk(kv.masters)
