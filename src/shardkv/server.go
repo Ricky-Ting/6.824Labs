@@ -384,6 +384,24 @@ func (kv *ShardKV) CheckConfig() {
 
 
 
+func (kv *ShardKV) sendTransfer(servers []string, num int, shard int, database map[string]string, lastRequestID map[int64]int, lastResponse map[int64]string) {
+	args := TransferArgs{num, shard, database, lastRequestID, lastResponse}
+	for _, server := range servers {
+		srv := kv.make_end(server)
+		go func(srv *labrpc.ClientEnd, args TransferArgs) {
+			for {
+				reply := TransferReply{}
+				ok := srv.Call("ShardKV.Transfer", &args, &reply)
+				if ok && reply.Success {
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}(srv, args)
+	}
+}
+
+
 //
 // the tester calls Kill() when a ShardKV instance won't
 // be needed again. you are not required to do anything
