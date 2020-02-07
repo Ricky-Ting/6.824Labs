@@ -75,6 +75,12 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
+	ck.mu.Lock()
+
+	// Detect duplicate requests
+	args.RequestId = ck.lastRequestId + 1
+	ck.lastRequestId++
+	ck.mu.Unlock()
 
 	for {
 		shard := key2shard(key)
@@ -111,6 +117,11 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.Value = value
 	args.Op = op
 
+	// Detect duplicate requests
+	ck.mu.Lock()
+	args.RequestId = ck.lastRequestId + 1
+	ck.lastRequestId++
+	ck.mu.Unlock()
 
 	for {
 		shard := key2shard(key)
