@@ -47,3 +47,17 @@ type GetReply struct {
 	Err         Err
 	Value       string
 }
+
+
+type TransferArgs struct {
+	Num 			int // Cfg.Num
+	Shard 			int // Shard
+	Database 		map[string]string
+	LastRequestID 	map[int64]int
+	LastResponse 	map[int64]string
+}
+
+type TransferReply struct {
+	Success 	bool
+	Err 		string
+}
