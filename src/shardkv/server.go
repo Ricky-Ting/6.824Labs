@@ -41,6 +41,82 @@ type ShardKV struct {
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	kv.mu.Lock()
+	if key2shard(args.Key) != kv.shard {
+		reply.Err = ErrWrongGroup
+		kv.mu.Unlock()
+		return
+	}
+
+	if args.RequestId <= kv.lastRequestID[args.Cid] {
+		reply.WrongLeader = false
+		reply.Err = OK
+		reply.Value = kv.lastResponse[args.Cid]
+		DPrintln("In server Get complete clerk = ", args.Cid," RequestId = ", args.RequestId)
+		kv.mu.Unlock()
+		return 
+	}
+
+	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, ""}
+	index, term, isLeader := kv.rf.Start(cmd)
+	if !isLeader {
+		reply.WrongLeader = true
+		kv.mu.Unlock()
+		return
+	}
+	reply.WrongLeader = false
+	kv.waitRequest[index] = 1
+	DPrintf("In server %d Get %s index = %d \n", kv.me, args.Key, index)
+	kv.mu.Unlock()
+
+	kv.applyCond.L.Lock()
+	kv.mu.Lock()
+	for _, ok := kv.Request[index]; !ok; _, ok = kv.Request[index]  {
+		kv.mu.Unlock()
+		kv.applyCond.Wait()
+		kv.mu.Lock()
+
+		if kv.shutdown {
+			delete(kv.waitRequest, index)
+			kv.applyCond.Broadcast()
+			reply.WrongLeader = true
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
+
+		curTerm, curIsLeader := kv.rf.GetState()
+		if curTerm != term || !curIsLeader {
+			delete(kv.waitRequest, index)
+			//kv.waitRequest[index] = 0
+			reply.WrongLeader = true
+			kv.applyCond.Broadcast()
+			DPrintf("In server Get %d not leader any more index %d failed", kv.me, index)
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return 
+		}
+
+	}
+	if kv.Request[index] != cmd {
+		delete(kv.waitRequest, index)
+		//kv.waitRequest[index] = 0
+		reply.WrongLeader = true
+		DPrintf("In server Get index %d not origin", index)
+		kv.applyCond.Broadcast()
+		kv.mu.Unlock()
+		kv.applyCond.L.Unlock()
+		return
+	}
+
+	delete(kv.waitRequest, index)
+	reply.Value = kv.lastResponse[args.Cid]
+	DPrintln("In server Get complete ", index)
+	kv.applyCond.Broadcast()
+	kv.mu.Unlock()
+	kv.applyCond.L.Unlock()
+
+	return
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
