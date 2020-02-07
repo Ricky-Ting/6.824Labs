@@ -57,8 +57,12 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 
 	if args.RequestId <= kv.lastRequestID[args.Cid] {
 		reply.WrongLeader = false
-		reply.Err = OK
-		reply.Value = kv.lastResponse[args.Cid]
+		if kv.lastResponse[args.Cid] != ErrWrongGroup {
+			reply.Err = OK
+			reply.Value = kv.lastResponse[args.Cid]
+		} else {
+			reply.Err = ErrWrongGroup
+		}
 		DPrintln("In server Get complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
@@ -117,8 +121,12 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	}
 
 	delete(kv.waitRequest, index)
-	reply.Err = OK
-	reply.Value = kv.lastResponse[args.Cid]
+	if kv.lastResponse[args.Cid] != ErrWrongGroup {
+		reply.Err = OK
+		reply.Value = kv.lastResponse[args.Cid]
+	} else {
+		reply.Err = ErrWrongGroup
+	}
 	DPrintln("In server Get complete ", index)
 	kv.applyCond.Broadcast()
 	kv.mu.Unlock()
@@ -139,8 +147,11 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	if args.RequestId <= kv.lastRequestID[args.Cid] {
 		reply.WrongLeader = false
-		reply.Err = OK
-		//reply.Value = lastResponse[args.Cid]
+		if kv.lastResponse[args.Cid] != ErrWrongGroup {
+			reply.Err = OK
+		} else {
+			reply.Err = ErrWrongGroup
+		}
 		DPrintln("In server PutAppend complete clerk = ", args.Cid," RequestId = ", args.RequestId)
 		kv.mu.Unlock()
 		return 
@@ -201,7 +212,11 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 	delete(kv.waitRequest, index)
-	reply.Err = OK
+	if kv.lastResponse[args.Cid] != ErrWrongGroup {
+		reply.Err = OK
+	} else {
+		reply.Err = ErrWrongGroup
+	}
 	DPrintln("In server PutAppend complete ", index)
 	kv.applyCond.Broadcast()
 	kv.mu.Unlock()
@@ -228,18 +243,34 @@ func (kv *KVServer) Apply() {
 		if !ok {
 			fmt.Println("In Apply: type error")
 		}
+
+		if op.OpType == "Config" {
+			if op.Cfg.Num > kv.cfg.Num {
+				kv.cfg = op.Cfg
+			}
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			continue
+		}
+
 		kv.Request[index] = op 
-		if op.RequestId > kv.lastRequestID[op.Cid] {
+		if op.RequestId > kv.lastRequestID[op.Cid] && kv.shards[key2shard(op.Key)] == kv.gid {
 			kv.lastRequestID[op.Cid] = op.RequestId
 			
 			DPrintln(" Server ", kv.me, " Apply  ", msg)
 			if op.OpType == "Append" {
 				kv.database[op.Key] = kv.database[op.Key] + op.Value
+				kv.lastResponse[op.Cid] = OK
 			} else if op.OpType == "Put" {
 				kv.database[op.Key] = op.Value
+				kv.lastResponse[op.Cid] = OK
 			} else if op.OpType == "Get" {
 				kv.lastResponse[op.Cid] = kv.database[op.Key]
 			}
+		}
+
+		if kv.shards[key2shard(op.Key)] != kv.gid {
+			kv.lastResponse[op.Cid] == ErrWrongGroup
 		}
 
 		kv.applyCond.Broadcast()
