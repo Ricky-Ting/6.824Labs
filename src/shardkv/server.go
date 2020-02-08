@@ -141,7 +141,9 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 		}
 
 		if kv.cfg.Shards[shard] != kv.gid {
+			delete(kv.waitRequest, index)
 			reply.Err = ErrWrongGroup
+			kv.applyCond.Broadcast()
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return
@@ -256,7 +258,9 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		}
 
 		if kv.cfg.Shards[shard] != kv.gid {
+			delete(kv.waitRequest, index)
 			reply.Err = ErrWrongGroup
+			kv.applyCond.Broadcast()
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return
@@ -346,24 +350,13 @@ func (kv *ShardKV) Apply() {
 
 		if op.OpType == "Config" {
 			if op.Cfg.Num <= kv.cfg.Num {
-				DPrintln("outdate cfg")
+				DPrintf("gid %d, server %d, outdate cfg\n", kv.gid, kv.me)
+				if kv.maxraftstate != -1 {
+					kv.saveSnapshot(index, term)
+				}
 				kv.mu.Unlock()
 				kv.applyCond.L.Unlock()
 				continue
-			}
-			flag := true
-			for flag {
-				flag = false
-				for i := 0; i < shardmaster.NShards; i++ {
-					if kv.cfg.Shards[i] == kv.gid && !kv.isReady[i] {
-						flag = true
-					}
-				}
-				if flag {
-					kv.mu.Unlock()
-					kv.applyCond.Wait()
-					kv.mu.Lock()
-				}
 			}
 
 			for i := 0; i < shardmaster.NShards; i++ {
@@ -396,6 +389,9 @@ func (kv *ShardKV) Apply() {
 			}
 			kv.cfg = op.Cfg
 			kv.applyCond.Broadcast()
+			if kv.maxraftstate != -1 {
+				kv.saveSnapshot(index, term)
+			}
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			DPrintln("Gid = ", kv.gid, " Server ", kv.me, " Apply receive ", msg, " Done!!!")
@@ -405,6 +401,9 @@ func (kv *ShardKV) Apply() {
 		if op.OpType == "ShardState" {
 			args := op.ShardState
 			if args.Num != kv.cfg.Num || kv.isReady[args.Shard] {
+				if kv.maxraftstate != -1 {
+					kv.saveSnapshot(index, term)
+				}
 				kv.mu.Unlock()
 				kv.applyCond.L.Unlock()
 				continue
@@ -414,6 +413,9 @@ func (kv *ShardKV) Apply() {
 			kv.lastResponse[args.Shard] = args.LastResponse
 			kv.isReady[args.Shard] = true
 			kv.applyCond.Broadcast()
+			if kv.maxraftstate != -1 {
+				kv.saveSnapshot(index, term)
+			}
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			continue
@@ -476,7 +478,7 @@ func (kv *ShardKV) saveSnapshot(index, term int) {
 
 func (kv *ShardKV) CheckConfig() {
 	for {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		kv.mu.Lock()
 		if kv.shutdown {
 			kv.mu.Unlock()
@@ -489,15 +491,35 @@ func (kv *ShardKV) CheckConfig() {
 		query := kv.cfg.Num + 1
 		kv.mu.Unlock()
 		config := kv.mck.Query(query)
+
+		kv.applyCond.L.Lock()
 		kv.mu.Lock()
 		if config.Num <= kv.cfg.Num {
 			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
 			continue
 		}
+		flag := true
+		for flag {
+			flag = false
+			for i := 0; i < shardmaster.NShards; i++ {
+				if kv.cfg.Shards[i] == kv.gid && !kv.isReady[i] {
+					flag = true
+				}
+			}
+			if flag {
+				kv.mu.Unlock()
+				kv.applyCond.Wait()
+				kv.mu.Lock()
+			}
+		}
 		cmd := Op{0, 0, "Config", "", "", config, TransferArgs{}}
-		DPrintln("old config: ", kv.cfg, " new config: ", config)
-		kv.rf.Start(cmd)
+		_, _, isLeader := kv.rf.Start(cmd)
+		if isLeader {
+			DPrintln("gid: ",kv.gid, "server: ", kv.me, "old config: ", kv.cfg, " new config: ", config)
+		}
 		kv.mu.Unlock()
+		kv.applyCond.L.Unlock()
 	}
 }
 /*
@@ -571,13 +593,13 @@ func (kv *ShardKV) sendTransfer(servers []string, num int, shard int, database m
 		srv := kv.make_end(server)
 		go func(srv *labrpc.ClientEnd, args TransferArgs, server string) {
 			for {
-				DPrintln("send ", args, " to ", server)
+				//DPrintln("send ", args, " to ", server)
 				reply := TransferReply{}
 				ok := srv.Call("ShardKV.Transfer", &args, &reply)
 				if ok && reply.Success {
 					return
 				}
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 			}
 		}(srv, args, server)
 	}
@@ -605,7 +627,7 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 	cmd := Op{0, 0, "ShardState", "", "", shardmaster.Config{}, ShardState}
 	_, _, isLeader := kv.rf.Start(cmd)
 	if isLeader {
-		reply.Success = true
+		reply.Success = false
 	} else {
 		reply.Success = false
 	}
