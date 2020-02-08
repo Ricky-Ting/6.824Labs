@@ -101,7 +101,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 		kv.mu.Unlock()
 		kv.applyCond.Wait()
 		kv.mu.Lock()
-		if kv.cfg.Shards[shard] != kv.gid {
+		if kv.cfg.Shards[shard] != kv.gid || kv.shutdown {
 			reply.Err = ErrWrongGroup
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
@@ -213,7 +213,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		kv.mu.Unlock()
 		kv.applyCond.Wait()
 		kv.mu.Lock()
-		if kv.cfg.Shards[shard] != kv.gid {
+		if kv.cfg.Shards[shard] != kv.gid || kv.shutdown {
 			reply.Err = ErrWrongGroup
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
@@ -338,7 +338,7 @@ func (kv *ShardKV) Apply() {
 		kv.mu.Lock()
 
 		index := msg.CommandIndex
-		//term := msg.CommandTerm
+		term := msg.CommandTerm
 		op, ok := msg.Command.(Op)
 		if !ok {
 			fmt.Println("In Apply: type error")
@@ -451,7 +451,7 @@ func (kv *ShardKV) Apply() {
 		delete(kv.Request, index)
 
 		if kv.maxraftstate != -1 {
-			//kv.saveSnapshot(index, term)
+			kv.saveSnapshot(index, term)
 		}
 
 		kv.mu.Unlock()
@@ -478,6 +478,10 @@ func (kv *ShardKV) CheckConfig() {
 	for {
 		time.Sleep(50 * time.Millisecond)
 		kv.mu.Lock()
+		if kv.shutdown {
+			kv.mu.Unlock()
+			return
+		}
 		if _, isLeader := kv.rf.GetState(); !isLeader {
 			kv.mu.Unlock()
 			continue
@@ -573,7 +577,7 @@ func (kv *ShardKV) sendTransfer(servers []string, num int, shard int, database m
 				if ok && reply.Success {
 					return
 				}
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(200 * time.Millisecond)
 			}
 		}(srv, args, server)
 	}
@@ -625,11 +629,11 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 //
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
-	/*
+	
 	kv.mu.Lock()
 	kv.shutdown = true
 	kv.mu.Unlock()
-	*/
+	
 	// Your code here, if desired.\
 }
 
