@@ -48,7 +48,6 @@ type GetReply struct {
 	Value       string
 }
 
-
 type TransferArgs struct {
 	Num 			int // Cfg.Num
 	Shard 			int // Shard
@@ -59,5 +58,19 @@ type TransferArgs struct {
 
 type TransferReply struct {
 	Success 	bool
-	Err 		string
+	Err 		Err
 }
+
+/*
+type TransferArgs struct {
+	Shard 		int
+}
+
+type TransferReply struct {
+	Num 			int // Cfg.Num
+	Shard 			int // Shard
+	Database 		map[string]string
+	LastRequestID 	map[int64]int
+	LastResponse 	map[int64]string
+}
+*/

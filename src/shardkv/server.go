@@ -10,7 +10,7 @@ import "fmt"
 import "log"
 import "time"
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -32,10 +32,11 @@ type Op struct {
 	// otherwise RPC will break.
 	Cid 		int64 	// Clerk's Id
 	RequestId 	int 	// Request's Id
-	OpType 		string  // Get, Put, Append or Config
+	OpType 		string  // Get, Put, Append, Config, ShardState
 	Key 		string
 	Value 		string
-	Cfg 		shardmaster.Config		
+	Cfg 		shardmaster.Config	
+	ShardState	TransferArgs
 }
 
 type ShardKV struct {
@@ -100,7 +101,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 		DPrintln("Gid = ", kv.gid, " In server sleep")
 	}
 
-	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, "", shardmaster.Config{}}
+	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, "", shardmaster.Config{}, TransferArgs{}}
 	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -213,7 +214,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		
 	}
 
-	cmd := Op{args.Cid, args.RequestId, args.Op, args.Key, args.Value, shardmaster.Config{}}
+	cmd := Op{args.Cid, args.RequestId, args.Op, args.Key, args.Value, shardmaster.Config{}, TransferArgs{}}
 	index, term, isLeader := kv.rf.Start(cmd)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -340,11 +341,11 @@ func (kv *ShardKV) Apply() {
 				}
 				if kv.cfg.Shards[i] != kv.gid && op.Cfg.Shards[i] == kv.gid {
 					kv.isReady[i] = false
+					//go kv.requsetTransfer(op.Cfg.Groups[kv.cfg.Shards[i]], i)
 					continue
 				}
 				if kv.cfg.Shards[i] == kv.gid && op.Cfg.Shards[i] != kv.gid {
 					kv.isReady[i] = false
-					// Send RPCs
 					database := make(map[string]string)
 					lastRequestID := make(map[int64]int)
 					lastResponse := make(map[int64]string)
@@ -357,8 +358,7 @@ func (kv *ShardKV) Apply() {
 					for k, v := range kv.lastResponse[i] {
 						lastResponse[k] = v
 					}
-					DPrintln("Prepare to send ")
-					go kv.sendTransfer(op.Cfg.Groups[op.Cfg.Shards[i]] , op.Cfg.Num, i, database, lastRequestID, lastResponse)
+					go kv.sendTransfer(op.Cfg.Groups[op.Cfg.Shards[i]], op.Cfg.Num, i, database, lastRequestID, lastResponse)
 				}
 			}
 			kv.cfg = op.Cfg
@@ -366,6 +366,23 @@ func (kv *ShardKV) Apply() {
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			DPrintln("Gid = ", kv.gid, " Server ", kv.me, " Apply receive ", msg, " Done!!!")
+			continue
+		}
+
+		if op.OpType == "ShardState" {
+			args := op.ShardState
+			if args.Num != kv.cfg.Num || kv.isReady[args.Shard] {
+				kv.mu.Unlock()
+				kv.applyCond.L.Unlock()
+				continue
+			}
+			kv.database[args.Shard] = args.Database
+			kv.lastRequestID[args.Shard] = args.LastRequestID
+			kv.lastResponse[args.Shard] = args.LastResponse
+			kv.isReady[args.Shard] = true
+			kv.applyCond.Broadcast()
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
 			continue
 		}
 
@@ -422,14 +439,76 @@ func (kv *ShardKV) CheckConfig() {
 			kv.mu.Unlock()
 			continue
 		}
-		cmd := Op{0, 0, "Config", "", "", config}
+		cmd := Op{0, 0, "Config", "", "", config, TransferArgs{}}
 		DPrintln("old config: ", kv.cfg, " new config: ", config)
 		kv.rf.Start(cmd)
 		kv.mu.Unlock()
 	}
 }
+/*
+func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
+	kv.applyCond.L.Lock()
+	defer kv.applyCond.L.Unlock()
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	
+	shard := args.Shard
+	DPrintf("gid %d server %d receive request shard %d \n", kv.gid, kv.me, shard)
+	
+	for kv.isReady[shard] {
+		kv.mu.Unlock()
+		kv.applyCond.Wait()
+		kv.mu.Lock()
+	}
+	DPrintf("gid %d server %d send request shard %d \n", kv.gid, kv.me, shard)
+	database := make(map[string]string)
+	lastRequestID := make(map[int64]int)
+	lastResponse := make(map[int64]string)
+	for k, v := range kv.database[shard] {
+		database[k] = v
+	}
+	for k, v := range kv.lastRequestID[shard] {
+		lastRequestID[k] = v
+	}
+	for k, v := range kv.lastResponse[shard] {
+		lastResponse[k] = v
+	}
 
+	reply.Num = kv.cfg.Num
+	reply.Shard = shard
+	reply.Database = database
+	reply.LastRequestID = lastRequestID
+	reply.LastResponse = lastResponse
 
+	return
+}
+
+func (kv *ShardKV) requsetTransfer(servers []string, shard int) {
+	args := TransferArgs{shard}
+	for {
+		for _, server := range servers {
+			reply := TransferReply{}
+			srv := kv.make_end(server)
+			DPrintf("gid %d server %d request shard %d \n", kv.gid, kv.me, shard)
+			ok := srv.Call("ShardKV.Transfer", &args, &reply)
+			DPrintf("gid %d server %d receive shard %d \n", kv.gid, kv.me, shard)
+			DPrintln("ok is ", ok)
+			if ok {
+				kv.mu.Lock()
+				DPrintf("gid %d server %d receive shard %d \n", kv.gid, kv.me, shard)
+				kv.database[shard] = reply.Database
+				kv.lastRequestID[shard] = reply.LastRequestID
+				kv.lastResponse[shard] = reply.LastResponse
+				kv.isReady[shard] = true
+				kv.applyCond.Broadcast()
+				kv.mu.Unlock()
+				return
+			}
+		}
+	}
+}
+
+*/
 
 func (kv *ShardKV) sendTransfer(servers []string, num int, shard int, database map[string]string, lastRequestID map[int64]int, lastResponse map[int64]string) {
 	args := TransferArgs{num, shard, database, lastRequestID, lastResponse}
@@ -443,7 +522,7 @@ func (kv *ShardKV) sendTransfer(servers []string, num int, shard int, database m
 				if ok && reply.Success {
 					return
 				}
-				//time.Sleep(5 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 			}
 		}(srv, args, server)
 	}
@@ -465,13 +544,24 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 		reply.Success = true
 		return
 	}
+
+	ShardState := TransferArgs{args.Num, args.Shard, args.Database, args.LastRequestID, args.LastResponse}
+
+	cmd := Op{0, 0, "ShardState", "", "", shardmaster.Config{}, ShardState}
+	_, _, isLeader := kv.rf.Start(cmd)
+	if isLeader {
+		reply.Success = true
+	} else {
+		reply.Success = false
+	}
+	/*
 	kv.database[args.Shard] = args.Database
 	kv.lastRequestID[args.Shard] = args.LastRequestID
 	kv.lastResponse[args.Shard] = args.LastResponse
 	kv.isReady[args.Shard] = true
 	reply.Success = true
-	kv.applyCond.Broadcast()
-	DPrintf("gid %d server %d receive shard %d \n", kv.gid, kv.me, args.Shard)
+	*/
+	//DPrintf("gid %d server %d receive shard %d \n", kv.gid, kv.me, args.Shard)
 	
 }
 
@@ -484,10 +574,12 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 //
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
+	/*
 	kv.mu.Lock()
 	kv.shutdown = true
 	kv.mu.Unlock()
-	// Your code here, if desired.
+	*/
+	// Your code here, if desired.\
 }
 
 
