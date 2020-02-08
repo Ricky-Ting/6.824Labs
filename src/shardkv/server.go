@@ -39,6 +39,15 @@ type Op struct {
 	ShardState	TransferArgs
 }
 
+type ShardServerState struct {
+	Database 		   	[shardmaster.NShards]map[string]string
+	LastRequestID 	   	[shardmaster.NShards]map[int64]int
+	LastResponse 	   	[shardmaster.NShards]map[int64]string
+	Cfg 				shardmaster.Config
+	IsReady 			[shardmaster.NShards]bool
+}
+
+
 type ShardKV struct {
 	mu           sync.Mutex
 	me           int
@@ -301,6 +310,30 @@ func (kv *ShardKV) Apply() {
 		}
 		DPrintln("Gid = ", kv.gid, " Server ", kv.me, " Apply receive ", msg)
 
+		if !msg.CommandValid {
+			kv.applyCond.L.Lock()
+			kv.mu.Lock()
+			
+			sp, ok := msg.Command.(raft.Snapshot)
+			if !ok {
+				fmt.Println("In Apply: type error")
+			}
+			state, ok2 := sp.ApplicationState.(ShardServerState)
+			if !ok2 {
+				fmt.Println("In Apply: type error")
+			}
+
+			kv.database = state.Database
+			kv.lastRequestID = state.LastRequestID
+			kv.lastResponse = state.LastResponse
+			kv.cfg= state.Cfg
+			kv.isReady = state.IsReady
+			
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			continue
+		}
+
 		kv.applyCond.L.Lock()
 		kv.mu.Lock()
 
@@ -417,9 +450,27 @@ func (kv *ShardKV) Apply() {
 
 		delete(kv.Request, index)
 
+		if kv.maxraftstate != -1 {
+			//kv.saveSnapshot(index, term)
+		}
+
 		kv.mu.Unlock()
 		kv.applyCond.L.Unlock()
 	}
+}
+
+
+func (kv *ShardKV) saveSnapshot(index, term int) {
+
+	if kv.maxraftstate > kv.persister.RaftStateSize() {
+		return
+	}
+
+	DPrintf("server %d, maxraftstate is %d, raftstatesize is %d \n", kv.me, kv.maxraftstate, kv.persister.RaftStateSize())
+	sp := raft.Snapshot{index, term, ShardServerState{kv.database, kv.lastRequestID, kv.lastResponse, kv.cfg, kv.isReady}}
+	DPrintf("server %d call raft.Snapshot \n", kv.me)
+	kv.rf.SaveSnapshot(sp)
+	DPrintf("server %d call raft.Snapshot return \n", kv.me)
 }
 
 
@@ -615,6 +666,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
+	labgob.Register(ShardServerState{})
 	DPrintln("Make ShardKV ", me)
 
 	kv := new(ShardKV)
