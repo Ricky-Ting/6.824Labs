@@ -10,7 +10,7 @@ import "fmt"
 import "log"
 import "time"
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -97,7 +97,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 			kv.applyCond.L.Unlock()
 			return
 		}
-		//DPrintln("Gid = ", kv.gid, " In server sleep")
+		DPrintln("Gid = ", kv.gid, " In server sleep")
 	}
 
 	cmd := Op{args.Cid, args.RequestId, "Get", args.Key, "", shardmaster.Config{}}
@@ -128,6 +128,13 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return 
+		}
+
+		if kv.cfg.Shards[shard] != kv.gid {
+			reply.Err = ErrWrongGroup
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return
 		}
 
 		curTerm, curIsLeader := kv.rf.GetState()
@@ -174,6 +181,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	kv.mu.Lock()
 	shard := key2shard(args.Key)
+	DPrintln("Key is ", args.Key, " kv.cfg is ", kv.cfg)
 	if kv.cfg.Shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
@@ -201,7 +209,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 			kv.applyCond.L.Unlock()
 			return
 		}
-		//DPrintln("Gid = ", kv.gid, " In server sleep")
+		DPrintln("Gid = ", kv.gid, " In server sleep")
 		
 	}
 
@@ -235,6 +243,13 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
 			return 
+		}
+
+		if kv.cfg.Shards[shard] != kv.gid {
+			reply.Err = ErrWrongGroup
+			kv.mu.Unlock()
+			kv.applyCond.L.Unlock()
+			return
 		}
 
 		//DPrintln("In server PutAppend", kv.Request[index] )
@@ -302,6 +317,21 @@ func (kv *ShardKV) Apply() {
 				kv.applyCond.L.Unlock()
 				continue
 			}
+			flag := true
+			for flag {
+				flag = false
+				for i := 0; i < shardmaster.NShards; i++ {
+					if kv.cfg.Shards[i] == kv.gid && !kv.isReady[i] {
+						flag = true
+					}
+				}
+				if flag {
+					kv.mu.Unlock()
+					kv.applyCond.Wait()
+					kv.mu.Lock()
+				}
+			}
+
 			for i := 0; i < shardmaster.NShards; i++ {
 				if kv.cfg.Shards[i] == 0 && op.Cfg.Shards[i] == kv.gid {
 					kv.isReady[i] = true
@@ -327,7 +357,7 @@ func (kv *ShardKV) Apply() {
 					for k, v := range kv.lastResponse[i] {
 						lastResponse[k] = v
 					}
-
+					DPrintln("Prepare to send ")
 					go kv.sendTransfer(op.Cfg.Groups[op.Cfg.Shards[i]] , op.Cfg.Num, i, database, lastRequestID, lastResponse)
 				}
 			}
@@ -335,6 +365,7 @@ func (kv *ShardKV) Apply() {
 			kv.applyCond.Broadcast()
 			kv.mu.Unlock()
 			kv.applyCond.L.Unlock()
+			DPrintln("Gid = ", kv.gid, " Server ", kv.me, " Apply receive ", msg, " Done!!!")
 			continue
 		}
 
@@ -377,20 +408,22 @@ func (kv *ShardKV) Apply() {
 
 func (kv *ShardKV) CheckConfig() {
 	for {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		kv.mu.Lock()
 		if _, isLeader := kv.rf.GetState(); !isLeader {
 			kv.mu.Unlock()
 			continue
 		}
+		query := kv.cfg.Num + 1
 		kv.mu.Unlock()
-		config := kv.mck.Query(-1)
+		config := kv.mck.Query(query)
 		kv.mu.Lock()
 		if config.Num <= kv.cfg.Num {
 			kv.mu.Unlock()
 			continue
 		}
 		cmd := Op{0, 0, "Config", "", "", config}
+		DPrintln("old config: ", kv.cfg, " new config: ", config)
 		kv.rf.Start(cmd)
 		kv.mu.Unlock()
 	}
@@ -402,27 +435,29 @@ func (kv *ShardKV) sendTransfer(servers []string, num int, shard int, database m
 	args := TransferArgs{num, shard, database, lastRequestID, lastResponse}
 	for _, server := range servers {
 		srv := kv.make_end(server)
-		go func(srv *labrpc.ClientEnd, args TransferArgs) {
+		go func(srv *labrpc.ClientEnd, args TransferArgs, server string) {
 			for {
+				DPrintln("send ", args, " to ", server)
 				reply := TransferReply{}
 				ok := srv.Call("ShardKV.Transfer", &args, &reply)
 				if ok && reply.Success {
 					return
 				}
-				time.Sleep(5 * time.Millisecond)
+				//time.Sleep(5 * time.Millisecond)
 			}
-		}(srv, args)
+		}(srv, args, server)
 	}
 }
 
-func (kv *ShardKV) Transfer(args *TransferArgs, reply, *TransferReply) {
+func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
-	if args.Num < kv.Cfg.Num {
+	if args.Num < kv.cfg.Num {
 		reply.Success = true
 		return
 	}
-	if args.Num > kv.Cfg.Num {
+	if args.Num > kv.cfg.Num {
 		reply.Success = false
 		return
 	}
@@ -434,8 +469,10 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply, *TransferReply) {
 	kv.lastRequestID[args.Shard] = args.LastRequestID
 	kv.lastResponse[args.Shard] = args.LastResponse
 	kv.isReady[args.Shard] = true
-
-	kv.mu.Unlock()
+	reply.Success = true
+	kv.applyCond.Broadcast()
+	DPrintf("gid %d server %d receive shard %d \n", kv.gid, kv.me, args.Shard)
+	
 }
 
 
@@ -447,6 +484,9 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply, *TransferReply) {
 //
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
+	kv.mu.Lock()
+	kv.shutdown = true
+	kv.mu.Unlock()
 	// Your code here, if desired.
 }
 
@@ -483,6 +523,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
+	DPrintln("Make ShardKV ", me)
 
 	kv := new(ShardKV)
 	kv.me = me
