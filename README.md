@@ -4,7 +4,7 @@
 
 ## Description 
 
-This is my completion of MIT 6.824 Distributed Systems's course project(see [here](http://nil.csail.mit.edu/6.824/2018/index.html)] for more details).
+This is my completion of MIT 6.824 Distributed Systems's course project(see [here](http://nil.csail.mit.edu/6.824/2018/index.html) for more details).
 
 **Language**: Go
 
